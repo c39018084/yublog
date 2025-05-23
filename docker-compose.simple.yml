@@ -1,0 +1,132 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: yublog_db
+    environment:
+      POSTGRES_DB: yublog
+      POSTGRES_USER: yublog
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme123}
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - backend
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yublog -d yublog"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Cache & Session Store
+  redis:
+    image: redis:7-alpine
+    container_name: yublog_redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redis123}
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Flask Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: yublog_backend
+    environment:
+      # Database Configuration
+      DATABASE_URL: postgresql://yublog:${DB_PASSWORD:-changeme123}@db:5432/yublog
+      
+      # Redis Configuration
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis123}@redis:6379/0
+      
+      # Security Keys
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev_jwt_secret_key_change_me}
+      SECRET_KEY: ${SECRET_KEY:-dev_secret_key_change_me}
+      
+      # WebAuthn Configuration
+      WEBAUTHN_RP_ID: localhost
+      WEBAUTHN_RP_NAME: YuBlog Local
+      WEBAUTHN_ORIGIN: http://localhost:3000
+      
+      # Flask Environment
+      FLASK_ENV: development
+      PORT: 5000
+      
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+      - frontend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - REACT_APP_API_URL=http://localhost:5000
+        - REACT_APP_WEBAUTHN_RP_ID=localhost
+    container_name: yublog_frontend
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000
+      - REACT_APP_WEBAUTHN_RP_ID=localhost
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  backend:
+    name: yublog_backend
+    driver: bridge
+  frontend:
+    name: yublog_frontend
+    driver: bridge
+
+volumes:
+  postgres_data:
+    name: yublog_postgres_data
+    driver: local
+  redis_data:
+    name: yublog_redis_data
+    driver: local 
