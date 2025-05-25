@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Shield, Key, Smartphone, Lock, CheckCircle, ArrowRight, Github, Globe } from 'lucide-react';
+import { Shield, Key, Monitor, Lock, CheckCircle, ArrowRight, Github, Globe } from 'lucide-react';
 
 const HomePage = () => {
   const features = [
@@ -16,9 +16,9 @@ const HomePage = () => {
       description: 'Full WebAuthn/FIDO2 support with hardware security keys for ultimate protection.',
     },
     {
-      icon: Smartphone,
-      title: 'QR Code Authentication',
-      description: 'Secure mobile authentication with cryptographic QR codes and push notifications.',
+      icon: Monitor,
+      title: 'Modern Web Platform',
+      description: 'Built with React and modern web technologies for a smooth, responsive experience.',
     },
     {
       icon: Lock,

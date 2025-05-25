@@ -1,12 +1,11 @@
 # YuBlog - Passwordless Secure Blogging Platform
 
-A self-hosted, highly secure blogging platform with passwordless authentication supporting YubiKey (FIDO2/WebAuthn) and QR code scanning for mobile device authentication.
+A self-hosted, highly secure blogging platform with passwordless authentication using YubiKey (FIDO2/WebAuthn) for ultimate security without passwords.
 
 ## 🔒 Security Features
 
 - **Passwordless Authentication**: No passwords stored or used anywhere
-- **YubiKey Support**: FIDO2/WebAuthn hardware security keys
-- **QR Code Authentication**: Mobile device authentication via QR scanning
+- **YubiKey Support**: Full FIDO2/WebAuthn hardware security key integration
 - **End-to-End Encryption**: TLS 1.3 with modern cipher suites
 - **Rate Limiting**: Protection against brute force attacks
 - **Audit Logging**: Complete security event tracking
@@ -28,7 +27,7 @@ A self-hosted, highly secure blogging platform with passwordless authentication 
 - **Backend**: Python Flask with security-first design
 - **Frontend**: React with WebAuthn integration
 - **Database**: PostgreSQL with encryption at rest
-- **Authentication**: WebAuthn + Custom QR/Push system
+- **Authentication**: WebAuthn/FIDO2 only (YubiKey, Touch ID, Windows Hello)
 - **Deployment**: Docker Compose for easy self-hosting
 
 ## 📁 Project Structure
@@ -37,8 +36,8 @@ A self-hosted, highly secure blogging platform with passwordless authentication 
 yublog/
 ├── docs/                     # Technical documentation
 ├── backend/                  # Flask API server
+├── backend-js/               # Alternative Node.js backend
 ├── frontend/                 # React web application
-├── mobile/                   # Mobile app for QR authentication
 ├── database/                 # Database schemas and migrations
 ├── docker/                   # Docker configurations
 ├── tests/                    # Comprehensive test suite
@@ -51,8 +50,14 @@ yublog/
 ### Prerequisites
 
 - Docker and Docker Compose
-- YubiKey or compatible FIDO2 security key
+- YubiKey or compatible FIDO2 security key (Touch ID, Windows Hello, etc.)
 - Modern web browser with WebAuthn support
+
+### Supported Authenticators
+
+- **Hardware Keys**: YubiKey 5 Series, SoloKeys, Google Titan
+- **Platform Authenticators**: Touch ID (macOS), Windows Hello, Android Fingerprint
+- **Mobile**: Any FIDO2-compatible mobile device
 
 ### Development Setup
 
@@ -90,6 +95,11 @@ yublog/
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:5000
 
+6. **Register your authenticator**:
+   - Navigate to http://localhost:3000/auth
+   - Choose "Register with YubiKey"
+   - Follow the browser prompts to register your security key
+
 ## 🔧 Configuration
 
 ### Environment Variables
@@ -100,38 +110,68 @@ Copy `environment.example` to `.env` and configure:
 - `REDIS_PASSWORD`: Strong Redis password  
 - `JWT_SECRET_KEY`: Cryptographically secure JWT secret
 - `SECRET_KEY`: Cryptographically secure Flask secret
-- `WEBAUTHN_RP_ID`: Your domain name
+- `WEBAUTHN_RP_ID`: Your domain name (e.g., localhost for development)
 - `WEBAUTHN_RP_NAME`: Your application name
-- `WEBAUTHN_ORIGIN`: Your application URL
+- `WEBAUTHN_ORIGIN`: Your application URL (e.g., http://localhost:3000)
 
 ### Production Deployment
 
 For production deployment:
 
-1. Use proper SSL certificates
+1. Use proper SSL certificates (Required for WebAuthn)
 2. Configure firewall rules
 3. Set up monitoring and logging
 4. Regular security updates
 5. Backup strategy implementation
 
+## 🛠️ Development Status
+
+### ✅ **Currently Implemented:**
+- WebAuthn/FIDO2 authentication (YubiKey, Touch ID, Windows Hello)
+- React frontend with modern UI
+- Flask backend with security best practices
+- Blog creation, editing, and management
+- User profile management
+- Comprehensive security headers
+- Rate limiting and audit logging
+- Docker containerization
+
+### 🚧 **Planned Features:**
+- QR Code authentication for mobile devices
+- Mobile companion app
+- Advanced blog themes
+- Plugin system
+- Multi-user support with roles
+- Social features (comments, sharing)
+
 ## 📚 Documentation
 
 - [Technical Design](docs/TECHNICAL_DESIGN.md)
-- [Security Architecture](docs/SECURITY.md)
-- [API Documentation](docs/API.md)
-- [Deployment Guide](docs/DEPLOYMENT.md)
+- [Docker Setup Guide](docs/Docker/)
 
 ## 🛡️ Security
 
 This project prioritizes security:
 
-- Zero password storage
-- Hardware-based authentication
-- Modern cryptographic standards
+- Zero password storage or transmission
+- Hardware-based authentication only
+- Modern cryptographic standards (WebAuthn/FIDO2)
 - Comprehensive audit logging
+- Security headers and CSP
 - Regular security reviews
 
-Report security issues to: [security contact]
+## 🆘 Troubleshooting
+
+### WebAuthn Issues:
+1. **HTTPS Required**: WebAuthn requires HTTPS in production
+2. **Browser Support**: Use Chrome, Firefox, Safari, or Edge
+3. **Security Key**: Ensure your YubiKey/device supports FIDO2
+4. **Domain Mismatch**: Check WEBAUTHN_RP_ID matches your domain
+
+### Common Problems:
+- **"WebAuthn not supported"**: Update your browser or use a compatible device
+- **"Registration failed"**: Check browser console and ensure HTTPS
+- **"Touch your security key"**: Press the button on your YubiKey when prompted
 
 ## 📄 License
 
