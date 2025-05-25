@@ -10,7 +10,6 @@ A self-hosted, highly secure blogging platform with passwordless authentication 
 - **Rate Limiting**: Protection against brute force attacks
 - **Audit Logging**: Complete security event tracking
 - **Session Management**: Secure JWT-based sessions with Redis storage
-- **No Personally Identifiable Information**: No need to worry about PII
 
 ## ⚠️ IMPORTANT SECURITY NOTICE
 
