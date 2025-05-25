@@ -15,16 +15,16 @@
 ### High-Level Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Web Browser   │    │  Mobile Device  │    │    YubiKey     │
-│   (Frontend)    │    │ (QR Auth App)   │    │  (FIDO2/U2F)   │
-└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
-          │ HTTPS/WSS            │ HTTPS/WSS            │ USB/NFC
-          │                      │                      │
-    ┌─────▼──────────────────────▼──────────────────────▼─────┐
-    │                 API Gateway                            │
-    │           (Nginx + Rate Limiting)                      │
-    └─────┬──────────────────────────────────────────────────┘
+┌─────────────────┐    ┌─────────────────┐
+│   Web Browser   │    │    YubiKey     │
+│   (Frontend)    │    │  (FIDO2/U2F)   │
+└─────────┬───────┘    └─────────┬───────┘
+          │ HTTPS              │ USB/NFC/BLE
+          │                    │
+    ┌─────▼────────────────────▼─────┐
+    │         API Gateway            │
+    │   (Nginx + Rate Limiting)      │
+    └─────┬──────────────────────────┘
           │ Internal Network
     ┌─────▼─────┐  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐
     │   Flask   │  │   Redis     │  │ PostgreSQL   │  │   File      │
@@ -36,16 +36,18 @@
 ### Component Details
 
 #### Frontend (React SPA)
-- **Framework**: React 18 with TypeScript
+- **Framework**: React 18 with modern JavaScript
 - **Security**: CSP headers, XSS protection, secure cookie handling
-- **Authentication**: WebAuthn API integration, QR code generation
-- **Communication**: HTTPS-only, WebSocket for real-time features
+- **Authentication**: WebAuthn API integration for hardware security keys
+- **Communication**: HTTPS-only, secure API communication
+- **Features**: Blog management, user profile, responsive design
 
 #### Backend (Flask API)
-- **Framework**: Flask with security extensions
-- **Authentication**: WebAuthn server, JWT tokens, device management
+- **Framework**: Flask with security extensions (Python) + Node.js alternative
+- **Authentication**: WebAuthn server implementation, JWT tokens
 - **Security**: Input validation, SQL injection prevention, rate limiting
-- **Features**: Blog CRUD, user management, authentication APIs
+- **Features**: Blog CRUD operations, user management, authentication APIs
+- **Future**: QR code authentication APIs (backend implemented, frontend pending)
 
 #### Database (PostgreSQL)
 - **Encryption**: AES-256 encryption at rest
@@ -85,7 +87,9 @@
 
 ### Authentication Endpoints
 
-#### YubiKey Authentication
+#### WebAuthn/FIDO2 Authentication (Currently Implemented)
+
+**Registration Flow:**
 
 ```http
 POST /api/auth/webauthn/register/begin
@@ -130,9 +134,11 @@ Content-Type: application/json
 Response:
 {
   "success": true,
-  "message": "YubiKey registered successfully"
+  "message": "Security key registered successfully"
 }
 ```
+
+**Authentication Flow:**
 
 ```http
 POST /api/auth/webauthn/login/begin
@@ -182,77 +188,7 @@ Response:
 }
 ```
 
-#### QR Code Authentication
-
-```http
-POST /api/auth/qr/generate
-Content-Type: application/json
-Authorization: Bearer <jwt-token>
-
-{
-  "deviceName": "iPhone 13"
-}
-
-Response:
-{
-  "qrCode": "data:image/png;base64,...",
-  "sessionId": "unique-session-id",
-  "expiresAt": "2024-01-01T12:00:00Z"
-}
-```
-
-```http
-POST /api/auth/qr/verify
-Content-Type: application/json
-
-{
-  "sessionId": "unique-session-id",
-  "deviceSignature": "base64-signature"
-}
-
-Response:
-{
-  "success": true,
-  "token": "jwt-token",
-  "user": {
-    "id": "user-id",
-    "username": "user@example.com"
-  }
-}
-```
-
-#### Device Management
-
-```http
-GET /api/auth/devices
-Authorization: Bearer <jwt-token>
-
-Response:
-{
-  "devices": [
-    {
-      "id": "device-id",
-      "name": "iPhone 13",
-      "type": "mobile",
-      "lastUsed": "2024-01-01T12:00:00Z",
-      "registered": "2024-01-01T10:00:00Z"
-    }
-  ]
-}
-```
-
-```http
-DELETE /api/auth/devices/{device-id}
-Authorization: Bearer <jwt-token>
-
-Response:
-{
-  "success": true,
-  "message": "Device removed successfully"
-}
-```
-
-### Blog Endpoints
+### Blog Management Endpoints (Currently Implemented)
 
 ```http
 GET /api/posts
@@ -317,29 +253,28 @@ Response:
 ### Entity Relationship Diagram
 
 ```
+┌─────────────────┐    ┌─────────────────┐    
+│      Users      │    │   Credentials   │    
+├─────────────────┤    ├─────────────────┤    
+│ id (UUID) PK    │    │ id (UUID) PK    │    
+│ username        │◄──►│ user_id FK      │    
+│ email           │    │ credential_id   │    
+│ display_name    │    │ public_key      │    
+│ created_at      │    │ counter         │    
+│ updated_at      │    │ created_at      │    
+│ is_active       │    │ last_used       │    
+└─────────────────┘    │ device_name     │    
+                       └─────────────────┘    
+
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│      Users      │    │   Credentials   │    │     Devices     │
+│      Posts      │    │   Post_Tags     │    │      Tags       │
 ├─────────────────┤    ├─────────────────┤    ├─────────────────┤
-│ id (UUID) PK    │    │ id (UUID) PK    │    │ id (UUID) PK    │
-│ username        │◄──►│ user_id FK      │    │ user_id FK      │◄──┐
-│ email           │    │ credential_id   │    │ device_name     │   │
-│ display_name    │    │ public_key      │    │ device_type     │   │
-│ created_at      │    │ counter         │    │ public_key      │   │
-│ updated_at      │    │ created_at      │    │ last_used       │   │
-│ is_active       │    │ last_used       │    │ push_token      │   │
-└─────────────────┘    └─────────────────┘    │ created_at      │   │
-                                              │ is_active       │   │
-                                              └─────────────────┘   │
-                                                                    │
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐   │
-│      Posts      │    │   Post_Tags     │    │      Tags       │   │
-├─────────────────┤    ├─────────────────┤    ├─────────────────┤   │
-│ id (UUID) PK    │    │ post_id FK      │    │ id (UUID) PK    │   │
-│ title           │◄──►│ tag_id FK       │◄──►│ name            │   │
-│ slug            │    └─────────────────┘    │ created_at      │   │
-│ content         │                           └─────────────────┘   │
-│ excerpt         │                                                 │
-│ author_id FK    │◄────────────────────────────────────────────────┘
+│ id (UUID) PK    │    │ post_id FK      │    │ id (UUID) PK    │
+│ title           │◄──►│ tag_id FK       │◄──►│ name            │
+│ slug            │    └─────────────────┘    │ created_at      │
+│ content         │                           └─────────────────┘
+│ excerpt         │                                              
+│ author_id FK    │◄─────────────────────────────────────────────┘
 │ published       │
 │ created_at      │    ┌─────────────────┐
 │ updated_at      │    │    Sessions     │
@@ -347,7 +282,7 @@ Response:
                        │ id (UUID) PK    │
                        │ user_id FK      │
                        │ token_hash      │
-                       │ device_id FK    │
+                       │ credential_id   │
                        │ expires_at      │
                        │ created_at      │
                        │ last_activity   │
@@ -373,7 +308,7 @@ CREATE TABLE users (
     CONSTRAINT valid_email CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
 );
 
--- WebAuthn credentials
+-- WebAuthn credentials (YubiKey, Touch ID, Windows Hello, etc.)
 CREATE TABLE credentials (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -382,25 +317,11 @@ CREATE TABLE credentials (
     counter BIGINT DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     last_used TIMESTAMP WITH TIME ZONE,
-    device_name VARCHAR(255),
+    device_name VARCHAR(255), -- e.g., "YubiKey 5C", "Touch ID", "Windows Hello"
+    authenticator_type VARCHAR(50), -- 'security_key', 'platform', 'hybrid'
     
     INDEX idx_credential_id (credential_id),
     INDEX idx_user_credentials (user_id)
-);
-
--- Registered devices for QR auth
-CREATE TABLE devices (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    device_name VARCHAR(255) NOT NULL,
-    device_type VARCHAR(50) NOT NULL, -- 'mobile', 'tablet', etc.
-    public_key TEXT NOT NULL,
-    push_token TEXT, -- For push notifications
-    last_used TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    is_active BOOLEAN DEFAULT TRUE,
-    
-    INDEX idx_user_devices (user_id)
 );
 
 -- Blog posts
@@ -441,7 +362,7 @@ CREATE TABLE sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     token_hash VARCHAR(255) UNIQUE NOT NULL,
-    device_id UUID REFERENCES devices(id) ON DELETE SET NULL,
+    credential_id TEXT REFERENCES credentials(credential_id) ON DELETE SET NULL,
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     last_activity TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -477,9 +398,9 @@ CREATE TABLE audit_logs (
 ### No Password Storage
 
 **Implementation**: The system uses exclusively public key cryptography:
-- **WebAuthn**: Public key credentials stored, private keys remain on YubiKey
-- **QR Auth**: Device public keys stored, private keys remain on mobile device
+- **WebAuthn**: Public key credentials stored, private keys remain on hardware authenticators
 - **Zero Password Policy**: No password fields, hashing algorithms, or password-related code
+- **Hardware Security**: Private keys never leave the security key or platform authenticator
 
 ### End-to-End Encryption
 
@@ -554,9 +475,9 @@ limiter = Limiter(
 def webauthn_login_begin():
     pass
 
-@app.route('/api/auth/qr/generate', methods=['POST'])
-@limiter.limit("3 per minute")
-def qr_generate():
+@app.route('/api/auth/webauthn/register/begin', methods=['POST'])
+@limiter.limit("3 per minute")  
+def webauthn_register_begin():
     pass
 ```
 
@@ -570,7 +491,7 @@ Content-Security-Policy:
   style-src 'self' 'unsafe-inline'; 
   img-src 'self' data: https:; 
   font-src 'self'; 
-  connect-src 'self' wss:; 
+  connect-src 'self'; 
   frame-ancestors 'none'; 
   base-uri 'self'; 
   form-action 'self'
@@ -584,72 +505,68 @@ Content-Security-Policy:
 4. **Insecure Design**: Security by design, threat modeling
 5. **Security Misconfiguration**: Secure defaults, automated security testing
 6. **Vulnerable Components**: Dependency scanning, regular updates
-7. **Authentication Failures**: WebAuthn, device-based auth, no passwords
+7. **Authentication Failures**: WebAuthn, hardware-based auth, no passwords
 8. **Software Integrity**: Code signing, SRI for frontend assets
 9. **Logging Failures**: Comprehensive audit logging, security monitoring
 10. **SSRF**: URL validation, allowlist of external services
 
 ## Authentication Flows
 
-### YubiKey Registration Flow
+### WebAuthn Registration Flow (Currently Implemented)
 
 ```mermaid
 sequenceDiagram
     participant U as User
     participant B as Browser
     participant S as Server
-    participant Y as YubiKey
+    participant A as Authenticator
     
     U->>B: Navigate to registration
     B->>S: POST /api/auth/webauthn/register/begin
     S->>B: Return challenge & options
-    B->>Y: navigator.credentials.create()
-    Y->>B: Return attestation
+    B->>A: navigator.credentials.create()
+    A->>U: Touch/verify authenticator
+    A->>B: Return attestation
     B->>S: POST /api/auth/webauthn/register/complete
     S->>S: Verify attestation & store credential
     S->>B: Registration success
     B->>U: Show success message
 ```
 
-### YubiKey Authentication Flow
+### WebAuthn Authentication Flow (Currently Implemented)
 
 ```mermaid
 sequenceDiagram
     participant U as User
     participant B as Browser
     participant S as Server
-    participant Y as YubiKey
+    participant A as Authenticator
     
     U->>B: Navigate to login
     B->>S: POST /api/auth/webauthn/login/begin
     S->>B: Return challenge & allowed credentials
-    B->>Y: navigator.credentials.get()
-    Y->>B: Return assertion
+    B->>A: navigator.credentials.get()
+    A->>U: Touch/verify authenticator
+    A->>B: Return assertion
     B->>S: POST /api/auth/webauthn/login/complete
     S->>S: Verify assertion & create session
     S->>B: Return JWT token
     B->>U: Redirect to dashboard
 ```
 
-### QR Code Authentication Flow
+### Supported Authenticators
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant B as Browser
-    participant S as Server
-    participant M as Mobile App
-    
-    U->>B: Navigate to QR login
-    B->>S: POST /api/auth/qr/generate
-    S->>B: Return QR code & session ID
-    B->>U: Display QR code
-    U->>M: Scan QR code
-    M->>S: POST /api/auth/qr/verify (with device signature)
-    S->>S: Verify device signature
-    S->>B: WebSocket: Authentication success
-    B->>U: Redirect to dashboard
-```
+- **Hardware Security Keys**: YubiKey 5 Series, SoloKeys, Google Titan
+- **Platform Authenticators**: Touch ID (macOS), Windows Hello, Android Fingerprint
+- **Cross-Platform**: Any FIDO2/WebAuthn compatible device
+
+### Future Authentication (Backend APIs Ready)
+
+The backend includes QR code authentication APIs for future mobile app implementation:
+- QR code generation for session linkage
+- Device registration and verification
+- Push notification support
+- Mobile app integration ready
 
 ## Deployment Architecture
 
