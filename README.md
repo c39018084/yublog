@@ -63,8 +63,9 @@ yublog/
 │   └── nginx/            # Nginx reverse proxy config
 ├── docs/                 # Documentation
 │   └── TECHNICAL_DESIGN.md # Technical specifications
-├── docker-compose.yml    # Full stack with Express.js backend
-├── docker-compose.simple.yml # Simple setup with Flask backend
+├── docker-compose.yml    # Full stack with Express.js backend + Nginx
+├── docker-compose.simple.yml # Simple setup with Express.js backend (no Nginx)
+├── docker-compose.flask.yml # Alternative Flask backend setup (for testing)
 └── README.md             # This file
 ```
 
@@ -90,34 +91,33 @@ docker-compose up -d
 docker-compose ps
 ```
 
-### Option 2: Simple Flask Backend Setup
+### Option 2: Simple Setup with Express.js Backend
 
-For development or testing with Flask backend:
+For a simpler development setup (no Nginx, direct port access):
 
 ```bash
-# Use the simple composition
+# Use the simple composition with Express.js backend
 docker-compose -f docker-compose.simple.yml up -d
 ```
 
-### Option 3: Development Mode
+### Option 3: Flask Backend (Alternative)
 
-Run individual services for development:
+If you specifically want to use the Flask backend for testing or development:
 
 ```bash
-# Start database and Redis
-docker-compose up -d db redis
+# Option A: Full Flask stack (isolated)
+docker-compose -f docker-compose.flask.yml up -d
+# Access at http://localhost:3001 (frontend) and http://localhost:5001 (API)
 
-# Express.js backend (recommended)
-cd backend-js
-npm install
-npm run dev
+# Option B: Manual Flask setup
+docker-compose -f docker-compose.simple.yml up -d db redis
 
-# OR Flask backend (alternative)
+# Then run Flask backend manually
 cd backend
 pip install -r requirements.txt
 python app.py
 
-# Frontend (in another terminal)
+# Frontend in another terminal
 cd frontend
 npm install
 npm start
