@@ -145,12 +145,17 @@ temp/
 *.sqlite
 *.sqlite3
 
-# SSL certificates and keys
+# SSL certificates and keys - NEVER commit these!
 *.pem
 *.key
 *.crt
 *.p12
 *.pfx
+*.cert
+*.ca-bundle
+docker/nginx/ssl/
+nginx/ssl/
+ssl/
 
 # Docker volumes
 postgres_data/
