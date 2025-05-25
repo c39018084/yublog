@@ -4,6 +4,12 @@
 !.env.example
 !environment.example
 
+# Sensitive folders - NEVER commit these!
+**/yubilog/
+**/yublog/
+docs/yubilog/
+docs/yublog/
+
 # Node.js
 node_modules/
 npm-debug.log*
@@ -154,6 +160,7 @@ redis_data/
 *.bak
 *.backup
 *.old
+*.orig
 
 # Security and sensitive files
 secrets/
@@ -173,4 +180,8 @@ certs/
 *.ntvs*
 *.njsproj
 *.sln
-*.sw? 
+*.sw?
+
+# Docker override files
+docker-compose.override.yml
+docker-compose.local.yml 
