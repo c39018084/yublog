@@ -42,11 +42,12 @@
 - **Communication**: HTTPS-only, secure API communication
 - **Features**: Blog management, user profile, responsive design
 
-#### Backend (Flask API)
-- **Framework**: Flask with security extensions (Python) + Node.js alternative
-- **Authentication**: WebAuthn server implementation, JWT tokens
-- **Security**: Input validation, SQL injection prevention, rate limiting
+#### Backend (Express.js API)
+- **Framework**: Express.js with security middleware (primary) + Flask alternative
+- **Authentication**: Native WebAuthn server implementation (no external libraries), JWT tokens
+- **Security**: Input validation, SQL injection prevention, rate limiting, Helmet.js
 - **Features**: Blog CRUD operations, user management, authentication APIs
+- **WebAuthn**: Custom CBOR decoding, COSE key handling, native crypto verification
 - **Future**: QR code authentication APIs (backend implemented, frontend pending)
 
 #### Database (PostgreSQL)
@@ -87,7 +88,14 @@
 
 ### Authentication Endpoints
 
-#### WebAuthn/FIDO2 Authentication (Currently Implemented)
+#### WebAuthn/FIDO2 Authentication (Currently Implemented - Express.js)
+
+The primary backend uses a **native WebAuthn implementation** built from scratch without external libraries, featuring:
+- Custom CBOR-X decoding for authenticator data
+- Native COSE key format handling  
+- Built-in crypto verification using Node.js crypto module
+- Support for ES256, RS256, and PS256 algorithms
+- Direct WebAuthn specification compliance
 
 **Registration Flow:**
 
@@ -418,23 +426,58 @@ ssl_session_timeout 10m;
 
 ### Input Validation & Sanitization
 
-**Backend Validation**:
-```python
-from marshmallow import Schema, fields, validate
-from bleach import clean
+**Backend Validation** (Express.js with express-validator):
+```javascript
+import { body, validationResult } from 'express-validator';
+import DOMPurify from 'dompurify';
+import { JSDOM } from 'jsdom';
 
-class PostSchema(Schema):
-    title = fields.Str(required=True, validate=validate.Length(max=500))
-    content = fields.Str(required=True, validate=validate.Length(max=50000))
-    tags = fields.List(fields.Str(validate=validate.Length(max=50)), missing=[])
-    
-    def load(self, json_data, *args, **kwargs):
-        data = super().load(json_data, *args, **kwargs)
-        # Sanitize HTML content
-        data['content'] = clean(data['content'], 
-            tags=['p', 'br', 'strong', 'em', 'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3'],
-            attributes={'a': ['href']})
-        return data
+const window = new JSDOM('').window;
+const purify = DOMPurify(window);
+
+// User registration validation
+const userRegistrationValidation = [
+  body('username')
+    .isLength({ min: 3, max: 50 })
+    .matches(/^[A-Za-z0-9_-]+$/)
+    .withMessage('Username must be 3-50 characters and contain only letters, numbers, hyphens, and underscores'),
+  body('email')
+    .optional()
+    .isEmail()
+    .withMessage('Must be a valid email address'),
+  body('display_name')
+    .optional()
+    .isLength({ min: 1, max: 255 })
+    .withMessage('Display name must be 1-255 characters')
+];
+
+// Post content validation with HTML sanitization
+const postValidation = [
+  body('title')
+    .isLength({ min: 1, max: 500 })
+    .withMessage('Title must be 1-500 characters'),
+  body('content')
+    .isLength({ min: 1, max: 50000 })
+    .customSanitizer(value => {
+      return purify.sanitize(value, {
+        ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3'],
+        ALLOWED_ATTR: ['href']
+      });
+    })
+    .withMessage('Content must be 1-50000 characters')
+];
+
+// Validation error handler
+function handleValidationErrors(req, res, next) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ 
+      error: 'Validation failed', 
+      details: errors.array() 
+    });
+  }
+  next();
+}
 ```
 
 ### Secure Session Management
@@ -457,28 +500,34 @@ app.config.update(
 
 ### Rate Limiting
 
-**Implementation**:
-```python
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+**Implementation** (Express.js with express-rate-limit):
+```javascript
+import rateLimit from 'express-rate-limit';
 
-limiter = Limiter(
-    app,
-    key_func=get_remote_address,
-    default_limits=["1000 per hour"],
-    storage_uri="redis://localhost:6379"
-)
+// General rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.'
+});
 
-# Auth endpoints
-@app.route('/api/auth/webauthn/login/begin', methods=['POST'])
-@limiter.limit("5 per minute")
-def webauthn_login_begin():
-    pass
+// Strict rate limiting for auth endpoints
+const strictLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 50, // limit each IP to 50 requests per windowMs
+  message: 'Too many authentication attempts, please try again later.'
+});
 
-@app.route('/api/auth/webauthn/register/begin', methods=['POST'])
-@limiter.limit("3 per minute")  
-def webauthn_register_begin():
-    pass
+app.use(limiter);
+
+// Auth endpoints with strict limiting
+app.post('/api/auth/webauthn/login/begin', strictLimiter, async (req, res) => {
+  await beginAuthentication(req, res);
+});
+
+app.post('/api/auth/webauthn/register/begin', strictLimiter, async (req, res) => {
+  await beginRegistration(req, res);
+});
 ```
 
 ### Content Security Policy
@@ -575,53 +624,148 @@ The backend includes QR code authentication APIs for future mobile app implement
 ```yaml
 version: '3.8'
 services:
+  # Express.js Backend (Primary - Native WebAuthn)
+  backend-js:
+    build:
+      context: ./backend-js
+      dockerfile: Dockerfile
+    container_name: yublog_backend_js
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 5000
+      
+      # Database Configuration
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: yublog
+      DB_USER: yublog
+      DB_PASSWORD: ${DB_PASSWORD:-CHANGE_ME_IN_PRODUCTION_123!}
+      
+      # Redis Configuration
+      REDIS_URL: redis://:${REDIS_PASSWORD:-CHANGE_ME_IN_PRODUCTION_456!}@redis:6379
+      
+      # JWT Configuration
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-GENERATE_NEW_JWT_SECRET_FOR_PRODUCTION}
+      
+      # WebAuthn Configuration
+      WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-YuBlog}
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
+      WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN:-https://localhost}
+      
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Flask Backend (Alternative - QR Code APIs)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: yublog_backend_flask
+    environment:
+      DATABASE_URL: postgresql://yublog:${DB_PASSWORD:-CHANGE_ME_IN_PRODUCTION_123!}@db:5432/yublog
+      REDIS_URL: redis://:${REDIS_PASSWORD:-CHANGE_ME_IN_PRODUCTION_456!}@redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-GENERATE_NEW_JWT_SECRET_FOR_PRODUCTION}
+      
+      # WebAuthn Configuration
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
+      WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-YuBlog}
+      WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN:-https://localhost:3000}
+      
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: unless-stopped
+    profiles:
+      - flask  # Optional profile for Flask backend
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-}
+        REACT_APP_WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
+    container_name: yublog_frontend
+    networks:
+      - frontend
+    restart: unless-stopped
+
+  # Nginx Reverse Proxy
   nginx:
     image: nginx:alpine
+    container_name: yublog_nginx
     ports:
       - "443:443"
       - "80:80"
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./ssl:/etc/ssl/certs
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - backend-js
+      - frontend
     networks:
       - frontend
+    restart: unless-stopped
 
-  app:
-    build: ./backend
-    environment:
-      - DATABASE_URL=postgresql://user:pass@db:5432/yublog
-      - REDIS_URL=redis://redis:6379/0
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-    networks:
-      - frontend
-      - backend
-
+  # PostgreSQL Database
   db:
     image: postgres:15-alpine
+    container_name: yublog_db
     environment:
-      - POSTGRES_DB=yublog
-      - POSTGRES_USER=yublog
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      POSTGRES_DB: yublog
+      POSTGRES_USER: yublog
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-CHANGE_ME_IN_PRODUCTION_123!}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - backend
+    restart: unless-stopped
 
+  # Redis Cache & Session Store
   redis:
     image: redis:7-alpine
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+    container_name: yublog_redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-CHANGE_ME_IN_PRODUCTION_456!}
+    volumes:
+      - redis_data:/data
     networks:
       - backend
+    restart: unless-stopped
 
 networks:
   frontend:
+    driver: bridge
   backend:
+    driver: bridge
     internal: true
 
 volumes:
   postgres_data:
+  redis_data:
 ```
+
+**Backend Options:**
+- **Primary**: Express.js with native WebAuthn implementation (recommended)
+- **Alternative**: Flask with WebAuthn library support (for development/testing)
+- **Simple Setup**: Use `docker-compose.simple.yml` with Flask backend only
 
 ## Scalability & Maintenance
 

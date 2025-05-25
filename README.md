@@ -22,83 +22,111 @@ A self-hosted, highly secure blogging platform with passwordless authentication 
 5. **Enable firewall** and restrict access to necessary ports only
 6. **Regular security updates** and monitoring
 
-## 🏗️ Architecture
+## ⚙️ Technical Architecture
 
-- **Backend**: Python Flask with security-first design
-- **Frontend**: React with WebAuthn integration
-- **Database**: PostgreSQL with encryption at rest
-- **Authentication**: WebAuthn/FIDO2 only (YubiKey, Touch ID, Windows Hello)
-- **Deployment**: Docker Compose for easy self-hosting
+- **Frontend**: React 18 with modern security practices
+- **Backend**: Express.js with native WebAuthn implementation (primary) + Flask alternative
+- **Database**: PostgreSQL with encrypted connections
+- **Cache**: Redis for sessions and rate limiting
+- **Authentication**: Custom WebAuthn server (no external auth libraries)
+- **Security**: Native CBOR decoding, COSE key handling, crypto verification
+- **Deployment**: Docker with Nginx reverse proxy and SSL termination
 
 ## 📁 Project Structure
 
 ```
 yublog/
-├── docs/                     # Technical documentation
-├── backend/                  # Flask API server
-├── backend-js/               # Alternative Node.js backend
-├── frontend/                 # React web application
-├── database/                 # Database schemas and migrations
-├── docker/                   # Docker configurations
-├── tests/                    # Comprehensive test suite
-├── security/                 # Security configurations and tools
-└── deployment/               # Deployment scripts and guides
+├── frontend/              # React frontend application
+│   ├── public/           # Static assets
+│   ├── src/              # React components and logic
+│   │   ├── components/   # Reusable UI components
+│   │   ├── pages/        # Page components
+│   │   ├── hooks/        # Custom React hooks
+│   │   └── utils/        # WebAuthn utilities
+│   └── package.json      # Frontend dependencies
+├── backend-js/           # Express.js backend (PRIMARY)
+│   ├── src/              # Source code
+│   │   ├── index.js      # Main Express server
+│   │   ├── webauthn.js   # Native WebAuthn implementation
+│   │   └── database.js   # Database connection and queries
+│   ├── package.json      # Node.js dependencies
+│   └── Dockerfile        # Express backend container
+├── backend/              # Flask backend (ALTERNATIVE)
+│   ├── app.py            # Main Flask application
+│   ├── auth_routes.py    # Authentication endpoints
+│   ├── blog_routes.py    # Blog management endpoints
+│   ├── requirements.txt  # Python dependencies
+│   └── Dockerfile        # Flask backend container
+├── database/             # Database setup and migrations
+│   └── init.sql          # Database schema initialization
+├── docker/               # Docker configuration
+│   └── nginx/            # Nginx reverse proxy config
+├── docs/                 # Documentation
+│   └── TECHNICAL_DESIGN.md # Technical specifications
+├── docker-compose.yml    # Full stack with Express.js backend
+├── docker-compose.simple.yml # Simple setup with Flask backend
+└── README.md             # This file
 ```
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### Option 1: Full Stack with Express.js Backend (Recommended)
 
-- Docker and Docker Compose
-- YubiKey or compatible FIDO2 security key (Touch ID, Windows Hello, etc.)
-- Modern web browser with WebAuthn support
+The default setup uses Express.js with native WebAuthn implementation:
 
-### Supported Authenticators
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/yublog.git
+cd yublog
 
-- **Hardware Keys**: YubiKey 5 Series, SoloKeys, Google Titan
-- **Platform Authenticators**: Touch ID (macOS), Windows Hello, Android Fingerprint
-- **Mobile**: Any FIDO2-compatible mobile device
+# Copy environment file and configure
+cp environment.example .env
+# Edit .env with your settings
 
-### Development Setup
+# Start the full stack (Express.js + React + PostgreSQL + Redis + Nginx)
+docker-compose up -d
 
-1. **Clone the repository**:
-   ```bash
-   git clone <repository-url>
-   cd yublog
-   ```
+# Check status
+docker-compose ps
+```
 
-2. **Create environment file**:
-   ```bash
-   cp environment.example .env
-   # Edit .env with your secure credentials
-   ```
+### Option 2: Simple Flask Backend Setup
 
-3. **Generate secure secrets**:
-   ```bash
-   # Generate JWT secret
-   python -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_urlsafe(32))"
-   
-   # Generate Flask secret
-   python -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(32))"
-   ```
+For development or testing with Flask backend:
 
-4. **Start the application**:
-   ```bash
-   # Simple development setup
-   docker-compose -f docker-compose.simple.yml up -d
-   
-   # Or full production setup
-   docker-compose up -d
-   ```
+```bash
+# Use the simple composition
+docker-compose -f docker-compose.simple.yml up -d
+```
 
-5. **Access the application**:
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:5000
+### Option 3: Development Mode
 
-6. **Register your authenticator**:
-   - Navigate to http://localhost:3000/auth
-   - Choose "Register with YubiKey"
-   - Follow the browser prompts to register your security key
+Run individual services for development:
+
+```bash
+# Start database and Redis
+docker-compose up -d db redis
+
+# Express.js backend (recommended)
+cd backend-js
+npm install
+npm run dev
+
+# OR Flask backend (alternative)
+cd backend
+pip install -r requirements.txt
+python app.py
+
+# Frontend (in another terminal)
+cd frontend
+npm install
+npm start
+```
+
+**Access the application:**
+- Frontend: https://localhost (or http://localhost:3000 in dev mode)
+- API Documentation: https://localhost/api/health
+- Database: localhost:5432 (in dev mode)
 
 ## 🔧 Configuration
 
