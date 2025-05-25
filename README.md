@@ -18,9 +18,15 @@ A self-hosted, highly secure blogging platform with passwordless authentication 
 1. **NEVER use the default passwords** in docker-compose files
 2. **ALWAYS create your own .env file** with strong, unique credentials
 3. **GENERATE new JWT secrets** using: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
-4. **Use proper SSL certificates** from a trusted Certificate Authority
-5. **Enable firewall** and restrict access to necessary ports only
-6. **Regular security updates** and monitoring
+4. **GENERATE new SSL certificates** - NEVER use development certificates in production
+5. **Use proper SSL certificates** from a trusted Certificate Authority
+6. **Enable firewall** and restrict access to necessary ports only
+7. **Regular security updates** and monitoring
+
+**SSL Certificate Security:**
+- Development SSL certificates are in `.gitignore` and NOT tracked in git
+- For production, generate new certificates: `openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes`
+- Use Let's Encrypt or proper CA certificates for public deployment
 
 ## ⚙️ Technical Architecture
 
