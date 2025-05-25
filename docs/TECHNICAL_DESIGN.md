@@ -27,9 +27,9 @@
     └─────┬──────────────────────────┘
           │ Internal Network
     ┌─────▼─────┐  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐
-    │   Flask   │  │   Redis     │  │ PostgreSQL   │  │   File      │
-    │ API Server│  │ (Sessions/  │  │ (Primary DB) │  │ Storage     │
-    │           │  │  Cache)     │  │              │  │ (Media)     │
+    │ Express.js│  │   Redis     │  │ PostgreSQL   │  │   File      │
+    │API Server │  │ (Sessions/  │  │ (Primary DB) │  │ Storage     │
+    │(Node.js)  │  │  Cache)     │  │              │  │ (Media)     │
     └───────────┘  └─────────────┘  └──────────────┘  └─────────────┘
 ```
 
@@ -70,8 +70,8 @@
 ┌─────────────────────────────▼───────────────────────────────┐
 │                  Application Zone                          │
 │  ┌─────────────────┐  ┌─────────────────────────────────┐  │
-│  │  Flask App      │  │      Redis Cache               │  │
-│  │  (API Server)   │  │      (Session Store)           │  │
+│  │ Express.js App  │  │      Redis Cache               │  │
+│  │ (API Server)    │  │      (Session Store)           │  │
 │  └─────────────────┘  └─────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -482,20 +482,50 @@ function handleValidationErrors(req, res, next) {
 
 ### Secure Session Management
 
-**JWT Configuration**:
-```python
-JWT_SECRET_KEY = os.environ['JWT_SECRET_KEY']  # 256-bit key
-JWT_ALGORITHM = 'HS256'
-JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
-JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
+**JWT Configuration** (Express.js):
+```javascript
+import jwt from 'jsonwebtoken';
 
-# Security headers
-app.config.update(
-    SESSION_COOKIE_SECURE=True,
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE='Strict',
-    PERMANENT_SESSION_LIFETIME=timedelta(hours=24)
-)
+const JWT_SECRET_KEY = process.env.JWT_SECRET_KEY; // 256-bit key
+const JWT_ALGORITHM = 'HS256';
+const JWT_ACCESS_TOKEN_EXPIRES = '1h';
+const JWT_REFRESH_TOKEN_EXPIRES = '30d';
+
+// JWT middleware
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  jwt.verify(token, JWT_SECRET_KEY, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+    req.user = user;
+    next();
+  });
+}
+
+// Security headers configuration with Helmet.js
+import helmet from 'helmet';
+
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      fontSrc: ["'self'"],
+      connectSrc: ["'self'"],
+      frameAncestors: ["'none'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false
+}));
 ```
 
 ### Rate Limiting
@@ -765,12 +795,12 @@ volumes:
 **Backend Options:**
 - **Primary**: Express.js with native WebAuthn implementation (recommended)
 - **Alternative**: Flask with WebAuthn library support (for development/testing)
-- **Simple Setup**: Use `docker-compose.simple.yml` with Flask backend only
+- **Simple Setup**: Use `docker-compose.simple.yml` with Express.js backend (no Nginx)
 
 ## Scalability & Maintenance
 
 ### Horizontal Scaling
-- **Load Balancing**: Nginx with multiple Flask instances
+- **Load Balancing**: Nginx with multiple Express.js instances
 - **Database**: Read replicas for scaling reads
 - **Caching**: Redis for session storage and query caching
 - **CDN**: Static asset distribution
