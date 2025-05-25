@@ -2,14 +2,26 @@
 
 A self-hosted, highly secure blogging platform with passwordless authentication supporting YubiKey (FIDO2/WebAuthn) and QR code scanning for mobile device authentication.
 
-## 🔐 Security Features
+## 🔒 Security Features
 
 - **Passwordless Authentication**: No passwords stored or used anywhere
-- **YubiKey Support**: Full FIDO2/WebAuthn implementation
-- **QR Code Authentication**: Mobile device push notification-based confirmation
-- **End-to-End Security**: Following OWASP best practices
-- **Self-Hosted**: No external cloud dependencies
-- **Zero Trust Architecture**: Principle of least privilege throughout
+- **YubiKey Support**: FIDO2/WebAuthn hardware security keys
+- **QR Code Authentication**: Mobile device authentication via QR scanning
+- **End-to-End Encryption**: TLS 1.3 with modern cipher suites
+- **Rate Limiting**: Protection against brute force attacks
+- **Audit Logging**: Complete security event tracking
+- **Session Management**: Secure JWT-based sessions with Redis storage
+
+## ⚠️ IMPORTANT SECURITY NOTICE
+
+**BEFORE DEPLOYING TO PRODUCTION:**
+
+1. **NEVER use the default passwords** in docker-compose files
+2. **ALWAYS create your own .env file** with strong, unique credentials
+3. **GENERATE new JWT secrets** using: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+4. **Use proper SSL certificates** from a trusted Certificate Authority
+5. **Enable firewall** and restrict access to necessary ports only
+6. **Regular security updates** and monitoring
 
 ## 🏗️ Architecture
 
@@ -36,30 +48,94 @@ yublog/
 
 ## 🚀 Quick Start
 
-```bash
-# Clone and setup
-git clone <repository>
-cd yublog
+### Prerequisites
 
-# Start with Docker Compose
-docker-compose up -d
+- Docker and Docker Compose
+- YubiKey or compatible FIDO2 security key
+- Modern web browser with WebAuthn support
 
-# Or manual setup (see deployment/SETUP.md for details)
-```
+### Development Setup
 
-## 📖 Documentation
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd yublog
+   ```
 
-- [Technical Design Document](docs/TECHNICAL_DESIGN.md)
+2. **Create environment file**:
+   ```bash
+   cp environment.example .env
+   # Edit .env with your secure credentials
+   ```
+
+3. **Generate secure secrets**:
+   ```bash
+   # Generate JWT secret
+   python -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_urlsafe(32))"
+   
+   # Generate Flask secret
+   python -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(32))"
+   ```
+
+4. **Start the application**:
+   ```bash
+   # Simple development setup
+   docker-compose -f docker-compose.simple.yml up -d
+   
+   # Or full production setup
+   docker-compose up -d
+   ```
+
+5. **Access the application**:
+   - Frontend: http://localhost:3000
+   - Backend API: http://localhost:5000
+
+## 🔧 Configuration
+
+### Environment Variables
+
+Copy `environment.example` to `.env` and configure:
+
+- `DB_PASSWORD`: Strong database password
+- `REDIS_PASSWORD`: Strong Redis password  
+- `JWT_SECRET_KEY`: Cryptographically secure JWT secret
+- `SECRET_KEY`: Cryptographically secure Flask secret
+- `WEBAUTHN_RP_ID`: Your domain name
+- `WEBAUTHN_RP_NAME`: Your application name
+- `WEBAUTHN_ORIGIN`: Your application URL
+
+### Production Deployment
+
+For production deployment:
+
+1. Use proper SSL certificates
+2. Configure firewall rules
+3. Set up monitoring and logging
+4. Regular security updates
+5. Backup strategy implementation
+
+## 📚 Documentation
+
+- [Technical Design](docs/TECHNICAL_DESIGN.md)
+- [Security Architecture](docs/SECURITY.md)
 - [API Documentation](docs/API.md)
-- [Security Implementation](docs/SECURITY.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)
 
-## 🛡️ Security Compliance
+## 🛡️ Security
 
-- OWASP Top 10 mitigation
-- NIST Cybersecurity Framework alignment
-- ISO 27001 security controls
-- GDPR privacy compliance ready
+This project prioritizes security:
+
+- Zero password storage
+- Hardware-based authentication
+- Modern cryptographic standards
+- Comprehensive audit logging
+- Regular security reviews
+
+Report security issues to: [security contact]
+
+## 📄 License
+
+MIT License - see LICENSE file for details.
 
 ---
 

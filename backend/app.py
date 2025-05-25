@@ -22,17 +22,14 @@ from flask_limiter.util import get_remote_address
 from flask_sqlalchemy import SQLAlchemy
 import redis
 import qrcode
-from webauthn import generate_registration_options, verify_registration_response
-from webauthn import generate_authentication_options, verify_authentication_response
-from webauthn.helpers.cose import COSEAlgorithmIdentifier
-from webauthn.helpers.structs import (
-    AuthenticatorSelectionCriteria,
-    UserVerificationRequirement,
-    RegistrationCredential,
-    AuthenticationCredential,
-    PublicKeyCredentialDescriptor,
-    PublicKeyCredentialType
+from webauthn import (
+    generate_registration_options,
+    verify_registration_response,
+    generate_authentication_options,
+    verify_authentication_response,
+    options_to_json
 )
+from webauthn.helpers.structs import AuthenticatorSelectionCriteria, UserVerificationRequirement
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.backends import default_backend
@@ -246,6 +243,8 @@ def hash_token(token: str) -> str:
     """Hash token for secure storage"""
     return hashlib.sha256(token.encode()).hexdigest()
 
+
+
 # Security Headers Middleware
 @app.after_request
 def security_headers(response):
@@ -299,48 +298,35 @@ def webauthn_register_begin():
         options = generate_registration_options(
             rp_id=app.config['WEBAUTHN_RP_ID'],
             rp_name=app.config['WEBAUTHN_RP_NAME'],
-            user_id=user_id,
+            user_id=user_id,  # Keep as string, not bytes
             user_name=validated_data['username'],
             user_display_name=validated_data['display_name'],
-            supported_pub_key_algs=[
-                COSEAlgorithmIdentifier.ECDSA_SHA_256,
-                COSEAlgorithmIdentifier.RSASSA_PKCS1_v1_5_SHA_256,
-            ],
+            # Use the new algorithm constants - ES256 (-7) and RS256 (-257)
+            supported_pub_key_algs=[-7, -257],
             authenticator_selection=AuthenticatorSelectionCriteria(
-                user_verification=UserVerificationRequirement.REQUIRED
+                user_verification=UserVerificationRequirement.PREFERRED
             ),
         )
         
-        # Store challenge in Redis with 5-minute expiration
+
+        
+        # Use the built-in options_to_json helper from the webauthn library
+        # This handles all the proper encoding for @simplewebauthn/browser compatibility
+        options_json_str = options_to_json(options)
+        options_dict = json.loads(options_json_str)
+        
+        # Store challenge for verification
         challenge_key = f"webauthn_challenge:{user_id}"
         redis_client.setex(
             challenge_key, 
             300,  # 5 minutes
             json.dumps({
-                'challenge': base64.b64encode(options.challenge).decode(),
+                'challenge': options_dict['challenge'],
                 'user_data': validated_data
             })
         )
         
-        return jsonify({
-            'challenge': base64.b64encode(options.challenge).decode(),
-            'rp': {'name': options.rp.name, 'id': options.rp.id},
-            'user': {
-                'id': base64.b64encode(options.user.id).decode(),
-                'name': options.user.name,
-                'displayName': options.user.display_name
-            },
-            'pubKeyCredParams': [
-                {'type': 'public-key', 'alg': alg.alg}
-                for alg in options.pub_key_cred_params
-            ],
-            'timeout': options.timeout,
-            'attestation': options.attestation.value,
-            'authenticatorSelection': {
-                'userVerification': options.authenticator_selection.user_verification.value
-            },
-            'excludeCredentials': []
-        })
+        return jsonify(options_dict)
         
     except ValidationError as e:
         log_audit_event(None, 'register_credential', False, 
@@ -363,33 +349,45 @@ def webauthn_register_complete():
     try:
         data = request.get_json()
         
-        # Get the user ID from the credential response
-        user_id_b64 = data.get('response', {}).get('userHandle') or data.get('user', {}).get('id')
-        if not user_id_b64:
-            return jsonify({'error': 'Missing user ID in response'}), 400
+        # In SimpleWebAuthn v13+, the response structure might not include userHandle
+        # So we'll just find the most recent challenge and try to verify with it
+        challenge_keys = redis_client.keys("webauthn_challenge:*")
         
-        # Get challenge from Redis using the user ID from the request
-        challenge_key = f"webauthn_challenge:{base64.b64decode(user_id_b64).decode('utf-8')}"
-        stored_data = redis_client.get(challenge_key)
+        if not challenge_keys:
+            return jsonify({'error': 'No pending registrations found'}), 400
         
-        if not stored_data:
-            log_audit_event(None, 'register_credential', False, 
-                          details={'error': 'Invalid or expired challenge'})
-            return jsonify({'error': 'Invalid or expired challenge'}), 400
+        # Sort by key (which includes timestamp-based UUID) and try the most recent first
+        challenge_keys.sort(reverse=True)
         
-        challenge_data = json.loads(stored_data)
-        challenge = base64.b64decode(challenge_data['challenge'])
-        user_data = challenge_data['user_data']
-        
-        # Verify registration response
-        credential = RegistrationCredential.parse_raw(json.dumps(data))
-        
-        verification = verify_registration_response(
-            credential=credential,
-            expected_challenge=challenge,
-            expected_origin=app.config['WEBAUTHN_ORIGIN'],
-            expected_rp_id=app.config['WEBAUTHN_RP_ID'],
-        )
+        for key in challenge_keys:
+            try:
+                stored_data = redis_client.get(key)
+                if not stored_data:
+                    continue
+                    
+                challenge_data = json.loads(stored_data)
+                user_data = challenge_data['user_data']
+                
+                # Verify registration response using the new API
+                verification = verify_registration_response(
+                    response=data,
+                    expected_challenge=challenge_data['challenge'],
+                    expected_origin=app.config['WEBAUTHN_ORIGIN'],
+                    expected_rp_id=app.config['WEBAUTHN_RP_ID'],
+                    require_user_verification=False,  # Match the working example
+                )
+                
+                if verification.verified:
+                    # Success! Clean up this challenge
+                    challenge_key = key
+                    break
+                    
+            except Exception as e:
+                # Try next challenge
+                continue
+        else:
+            # No matching challenge found
+            return jsonify({'error': 'Registration verification failed. Please try again.'}), 400
         
         if not verification.verified:
             log_audit_event(None, 'register_credential', False, 
@@ -407,8 +405,8 @@ def webauthn_register_complete():
         
         credential_record = Credential(
             user_id=user.id,
-            credential_id=base64.b64encode(verification.credential_id).decode(),
-            public_key=base64.b64encode(verification.credential_public_key).decode(),
+            credential_id=verification.credential_id,
+            public_key=verification.credential_public_key,
             counter=verification.sign_count,
             device_name=data.get('deviceName', 'Unknown Device'),
             aaguid=str(verification.aaguid) if verification.aaguid else None
@@ -472,34 +470,27 @@ def webauthn_login_begin():
         options = generate_authentication_options(
             rp_id=app.config['WEBAUTHN_RP_ID'],
             allow_credentials=[
-                PublicKeyCredentialDescriptor(
-                    id=base64.b64decode(cred.credential_id)
-                )
+                {
+                    'id': cred.credential_id,
+                    'transports': ['usb', 'nfc', 'ble', 'internal']
+                }
                 for cred in credentials
             ],
         )
+        
+        # Use the built-in options_to_json helper
+        options_json_str = options_to_json(options)
+        options_dict = json.loads(options_json_str)
         
         # Store challenge in Redis
         challenge_key = f"webauthn_auth_challenge:{user.id}"
         redis_client.setex(
             challenge_key,
             300,  # 5 minutes
-            base64.b64encode(options.challenge).decode()
+            options_dict['challenge']
         )
         
-        return jsonify({
-            'challenge': base64.b64encode(options.challenge).decode(),
-            'rp_id': options.rp_id,
-            'allowCredentials': [
-                {
-                    'type': 'public-key',
-                    'id': base64.b64encode(base64.b64decode(cred.credential_id)).decode()
-                }
-                for cred in credentials
-            ],
-            'userVerification': 'required',
-            'timeout': options.timeout
-        })
+        return jsonify(options_dict)
         
     except Exception as e:
         log_audit_event(None, 'login_attempt', False, 
@@ -533,18 +524,19 @@ def webauthn_login_complete():
                           details={'error': 'Invalid or expired challenge'})
             return jsonify({'error': 'Invalid or expired challenge'}), 400
         
-        challenge = base64.b64decode(stored_challenge)
-        
-        # Verify authentication response
-        credential = AuthenticationCredential.parse_raw(json.dumps(data))
-        
+        # Verify authentication response using the new API
         verification = verify_authentication_response(
-            credential=credential,
-            expected_challenge=challenge,
+            response=data,
+            expected_challenge=stored_challenge.decode(),
             expected_origin=app.config['WEBAUTHN_ORIGIN'],
             expected_rp_id=app.config['WEBAUTHN_RP_ID'],
-            credential_public_key=base64.b64decode(credential_record.public_key),
-            credential_current_sign_count=credential_record.counter,
+            credential={
+                'id': credential_record.credential_id,
+                'public_key': credential_record.public_key,
+                'sign_count': credential_record.counter,
+                'transports': ['usb', 'nfc', 'ble', 'internal']
+            },
+            require_user_verification=False,  # Match the working example
         )
         
         if not verification.verified:

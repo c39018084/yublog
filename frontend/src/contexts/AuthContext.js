@@ -16,24 +16,45 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem('yublog_token'));
+  const [skipProfileFetch, setSkipProfileFetch] = useState(false);
 
   // Configure axios defaults
   useEffect(() => {
     if (token) {
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      // Verify token and get user data
-      fetchUserProfile();
+      // Only verify token and get user data if we don't already have user data
+      if (!user && !skipProfileFetch) {
+        fetchUserProfile();
+      } else {
+        setIsLoading(false);
+      }
     } else {
       setIsLoading(false);
     }
-  }, [token]);
+  }, [token, skipProfileFetch]);
+
+  // Debug authentication state changes
+  useEffect(() => {
+    console.log('Auth state changed:', {
+      hasUser: !!user,
+      hasToken: !!token,
+      isAuthenticated: Boolean(user && token),
+      isLoading,
+      skipProfileFetch
+    });
+  }, [user, token, isLoading, skipProfileFetch]);
 
   const fetchUserProfile = async () => {
     try {
+      console.log('Fetching user profile...');
       const response = await axios.get('/api/user/profile');
-      setUser(response.data.user);
+      console.log('Profile fetch successful:', response.data);
+      setUser(response.data);
     } catch (error) {
       console.error('Failed to fetch user profile:', error);
+      if (error.response) {
+        console.error('Error response:', error.response.status, error.response.data);
+      }
       // Token might be invalid, clear it
       logout();
     } finally {
@@ -42,11 +63,22 @@ export const AuthProvider = ({ children }) => {
   };
 
   const login = (authToken, userData) => {
+    console.log('AuthContext login called with:', { authToken: !!authToken, userData });
+    
+    setSkipProfileFetch(true); // Don't fetch profile since we already have user data
     setToken(authToken);
     setUser(userData);
     localStorage.setItem('yublog_token', authToken);
     axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
+    setIsLoading(false); // Set loading to false since we have all the data we need
+    
+    console.log('AuthContext state updated. Token set:', !!authToken, 'User set:', !!userData);
     toast.success(`Welcome back, ${userData.displayName || userData.username}!`);
+    
+    // Reset skip flag after a short delay
+    setTimeout(() => {
+      setSkipProfileFetch(false);
+    }, 1000);
   };
 
   const logout = async () => {

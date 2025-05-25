@@ -62,8 +62,19 @@ const AuthPage = () => {
       const result = await authenticateWebAuthn(formData.username);
       
       if (result.token) {
+        console.log('About to call login with:', { token: result.token, user: result.user });
         login(result.token, result.user);
+        console.log('Login called successfully');
         toast.success('Welcome back!');
+        
+        // Add a short delay to ensure state updates
+        setTimeout(() => {
+          console.log('Current auth state after login:', {
+            isAuthenticated: Boolean(result.token && result.user),
+            hasToken: !!result.token,
+            hasUser: !!result.user
+          });
+        }, 100);
       }
     } catch (error) {
       console.error('Login error:', error);
