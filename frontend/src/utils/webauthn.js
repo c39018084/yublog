@@ -92,69 +92,102 @@ function convertAssertionForTransport(assertion) {
 }
 
 /**
- * Register a new WebAuthn credential (YubiKey)
+ * Register a new WebAuthn credential (Security Key)
  */
-export const registerWebAuthn = async (userData) => {
+export async function registerWebAuthn(userData) {
   try {
+    console.log('WebAuthn registration starting for:', userData);
+
+    if (!isWebAuthnSupported()) {
+      throw new WebAuthnError('not_supported', 'WebAuthn is not supported on this device/browser');
+    }
+
     // Step 1: Begin registration
     console.log('Starting WebAuthn registration for:', userData);
-    const { data: options } = await api.post('/api/auth/webauthn/register/begin', userData);
-    
-    console.log('WebAuthn options received from server:', JSON.stringify(options, null, 2));
-    
-    // Step 2: Convert options for browser API
-    const publicKeyCredentialCreationOptions = convertPublicKeyCredentialCreationOptions(options);
-    
-    console.log('Converted options for browser:', publicKeyCredentialCreationOptions);
-    
-    // Step 3: Get credential from authenticator using native API
+    const { data: options } = await api.post('/auth/webauthn/register/begin', userData);
+
+    console.log('Registration options received:', options);
+
+    // Step 2: Convert challenge and user ID from base64url
+    const challenge = base64URLToArrayBuffer(options.challenge);
+    const userId = base64URLToArrayBuffer(options.user.id);
+
+    // Step 3: Prepare credential creation options
+    const publicKeyCredentialCreationOptions = {
+      ...options,
+      challenge,
+      user: {
+        ...options.user,
+        id: userId,
+      },
+    };
+
+    console.log('Creating credential with options:', publicKeyCredentialCreationOptions);
+
+    // Step 4: Create credential using WebAuthn API
     const credential = await navigator.credentials.create({
-      publicKey: publicKeyCredentialCreationOptions
+      publicKey: publicKeyCredentialCreationOptions,
     });
-    
+
+    console.log('Credential created:', credential);
+
     if (!credential) {
-      throw new Error('Failed to create credential');
+      throw new WebAuthnError('not_allowed', 'User cancelled the registration process');
     }
-    
-    console.log('Received credential from authenticator:', credential);
-    
-    // Step 4: Convert credential for transport
-    const credentialForTransport = convertCredentialForTransport(credential);
-    
-    console.log('Credential converted for transport:', credentialForTransport);
-    
+
+    // Step 5: Prepare credential for transport
+    const credentialForTransport = {
+      id: credential.id,
+      rawId: credential.id,
+      response: {
+        clientDataJSON: arrayBufferToBase64URL(credential.response.clientDataJSON),
+        attestationObject: arrayBufferToBase64URL(credential.response.attestationObject),
+      },
+      type: credential.type,
+    };
+
+    console.log('Credential prepared for transport:', credentialForTransport);
+
     // Step 5: Complete registration
-    const { data: result } = await api.post('/api/auth/webauthn/register/complete', credentialForTransport);
-    
-    console.log('Registration completed successfully:', result);
+    const { data: result } = await api.post('/auth/webauthn/register/complete', credentialForTransport);
+
+    console.log('Registration completed:', result);
     return result;
   } catch (error) {
     console.error('WebAuthn registration error:', error);
     
-    if (error.name === 'InvalidStateError') {
-      throw new Error('Authenticator is already registered. Please try logging in instead.');
-    } else if (error.name === 'NotAllowedError') {
-      throw new Error('Registration was cancelled or timed out.');
+    if (error.name === 'NotSupportedError') {
+      throw new WebAuthnError('not_supported', 'WebAuthn is not supported on this device');
     } else if (error.name === 'SecurityError') {
-      throw new Error('Security error. Please make sure you\'re using HTTPS.');
-    } else if (error.name === 'NotSupportedError') {
-      throw new Error('WebAuthn is not supported on this device/browser.');
+      throw new WebAuthnError('security_error', 'Security error occurred during registration');
+    } else if (error.name === 'NotAllowedError') {
+      throw new WebAuthnError('not_allowed', 'Registration was cancelled or not allowed');
+    } else if (error.name === 'InvalidStateError') {
+      throw new WebAuthnError('invalid_state', 'This security key is already registered');
+    } else if (error.response?.status === 429) {
+      // Handle device blocking
+      const errorData = error.response.data;
+      throw new WebAuthnError('device_blocked', errorData.message, {
+        blocked_until: errorData.blocked_until,
+        days_remaining: errorData.days_remaining,
+        reason: errorData.reason
+      });
     } else if (error.response?.data?.error) {
-      throw new Error(error.response.data.error);
+      throw new WebAuthnError('registration_failed', error.response.data.error);
+    } else {
+      throw new WebAuthnError('registration_failed', error.message || 'Registration failed');
     }
-    
-    throw new Error('Registration failed. Please try again.');
   }
-};
+}
 
 /**
- * Authenticate with WebAuthn (YubiKey login)
+ * Authenticate with WebAuthn (Security Key login)
  */
 export const authenticateWebAuthn = async (username) => {
   try {
     // Step 1: Begin authentication
     console.log('Starting WebAuthn authentication for:', username);
-    const { data: options } = await api.post('/api/auth/webauthn/login/begin', { username });
+    const { data: options } = await api.post('/auth/webauthn/login/begin', { username });
     
     console.log('WebAuthn auth options received from server:', JSON.stringify(options, null, 2));
     
@@ -180,7 +213,7 @@ export const authenticateWebAuthn = async (username) => {
     console.log('Assertion converted for transport:', assertionForTransport);
     
     // Step 5: Complete authentication
-    const { data: result } = await api.post('/api/auth/webauthn/login/complete', assertionForTransport);
+    const { data: result } = await api.post('/auth/webauthn/login/complete', assertionForTransport);
     
     console.log('Authentication completed successfully:', result);
     console.log('Result has token:', !!result.token);
@@ -191,13 +224,21 @@ export const authenticateWebAuthn = async (username) => {
     console.error('WebAuthn authentication error:', error);
     
     if (error.name === 'InvalidStateError') {
-      throw new Error('No credentials found for this account.');
+      const invalidStateError = new Error('No credentials found for this account. Please make sure you\'re using the correct username and that your security key is registered.');
+      invalidStateError.type = 'invalid_state';
+      throw invalidStateError;
     } else if (error.name === 'NotAllowedError') {
-      throw new Error('Authentication was cancelled or timed out.');
+      const notAllowedError = new Error('Authentication was cancelled or timed out. Please try again and make sure to touch your security key when prompted.');
+      notAllowedError.type = 'not_allowed';
+      throw notAllowedError;
     } else if (error.name === 'SecurityError') {
-      throw new Error('Security error. Please make sure you\'re using HTTPS.');
+      const securityError = new Error('Security error occurred. Please make sure you\'re using HTTPS and try again.');
+      securityError.type = 'security_error';
+      throw securityError;
     } else if (error.name === 'NotSupportedError') {
-      throw new Error('WebAuthn is not supported on this device/browser.');
+      const notSupportedError = new Error('WebAuthn is not supported on this device/browser. Please use a modern browser like Chrome, Firefox, Safari, or Edge.');
+      notSupportedError.type = 'not_supported';
+      throw notSupportedError;
     } else if (error.response?.data?.error) {
       throw new Error(error.response.data.error);
     }

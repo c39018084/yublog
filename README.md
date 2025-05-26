@@ -6,9 +6,12 @@ A self-hosted, highly secure blogging platform with passwordless authentication 
 
 - **Passwordless Authentication**: No passwords stored or used anywhere
 - **YubiKey Support**: Full FIDO2/WebAuthn hardware security key integration
+- **Account Spam Prevention**: 34-day cooldown between device registrations to prevent account spamming
+- **Device Registration Tracking**: AAGUID-based device identification and registration limits
+- **Admin Privileges**: First registered user automatically receives administrator privileges
 - **End-to-End Encryption**: TLS 1.3 with modern cipher suites
 - **Rate Limiting**: Protection against brute force attacks
-- **Audit Logging**: Complete security event tracking
+- **Audit Logging**: Complete security event tracking with device registration monitoring
 - **Session Management**: Secure JWT-based sessions with Redis storage
 
 ## ⚠️ IMPORTANT SECURITY NOTICE
@@ -147,22 +150,65 @@ npm start
 ```
 
 **Access the application:**
-- Frontend: https://localhost (or http://localhost:3000 in dev mode)
-- API Documentation: https://localhost/api/health
-- Database: localhost:5432 (in dev mode)
+- **Frontend**: https://localhost (nginx reverse proxy)
+- **API**: https://localhost/api/health (nginx reverse proxy)
+- **Direct Development Access**: 
+  - Frontend: http://localhost:3000 (simple setup only)
+  - Backend: http://localhost:5000 (simple setup only)
+- **Database**: localhost:5432 (development access)
 
 ### Development Commands
 
-Use the included Makefile for common development tasks:
+**🚀 Quick Development Workflow (Recommended):**
 
 ```bash
-make help      # Show all available commands
-make setup     # Set up development environment
-make up        # Start all services
-make down      # Stop all services
-make rebuild   # Rebuild and restart (useful after code changes)
-make logs      # Show service logs
-make clean     # Clean up Docker resources
+# Most common: restart with fresh code after making changes
+./dev.sh                # Quick restart (default command)
+./dev.sh restart        # Same as above
+./dev.sh logs           # Watch backend logs in real-time
+./dev.sh status         # Check service status
+./dev.sh rebuild        # Full rebuild (when dependencies change)
+```
+
+**📋 Makefile Commands:**
+
+```bash
+make help           # Show all available commands
+make setup          # Set up development environment
+make up             # Start all services
+make down           # Stop all services
+
+# Development workflow (ensures code changes are picked up):
+make dev-restart    # Quick restart with code refresh (recommended)
+make dev-rebuild    # Full rebuild with cache clearing
+make dev-clean      # Nuclear option: clean everything and rebuild
+make dev-logs       # Show backend logs in real-time
+
+# Debugging:
+make logs           # Show service logs
+make status         # Show service status and resource usage
+make clean          # Clean up Docker resources
+```
+
+**💡 Development Workflow Tips:**
+
+- **After making code changes**: Run `./dev.sh` (fastest)
+- **After changing dependencies**: Run `./dev.sh rebuild`
+- **If something seems broken**: Run `make dev-clean` (nuclear option)
+- **To watch logs while developing**: Run `./dev.sh logs`
+
+### Database Reset (Fresh Start)
+
+To reset the database and apply the new security features:
+
+```bash
+# Reset database with new security schema (Docker)
+./scripts/reset-database-docker.sh
+
+# Or manually with Docker
+docker-compose down -v
+docker-compose up -d db redis
+./scripts/reset-database-docker.sh
 ```
 
 ## 🔧 Configuration
@@ -194,9 +240,13 @@ For production deployment:
 ### ✅ **Currently Implemented:**
 - WebAuthn/FIDO2 authentication (YubiKey, Touch ID, Windows Hello)
 - React frontend with modern UI
-- Flask backend with security best practices
+- Express.js backend with native WebAuthn implementation
+- Flask backend alternative with security best practices
 - Blog creation, editing, and management
 - User profile management
+- **Device registration spam prevention (34-day cooldown)**
+- **Automatic admin privileges for first user**
+- **AAGUID-based device tracking and identification**
 - Comprehensive security headers
 - Rate limiting and audit logging
 - Docker containerization
@@ -211,6 +261,7 @@ For production deployment:
 
 ## 📚 Documentation
 
+- [Security Features](docs/SECURITY_FEATURES.md) - **NEW: Account spam prevention & admin privileges**
 - [Technical Design](docs/TECHNICAL_DESIGN.md)
 - [Docker Setup Guide](docs/Docker/)
 
@@ -224,6 +275,69 @@ This project prioritizes security:
 - Comprehensive audit logging
 - Security headers and CSP
 - Regular security reviews
+
+### 🔐 Account Spam Prevention
+
+YuBlog implements sophisticated device-based account spam prevention:
+
+- **Device Identification**: Uses AAGUID (Authenticator Attestation GUID) to uniquely identify security keys
+- **34-Day Cooldown**: Each device can only create one account every 34 days
+- **Attestation Tracking**: Tracks attestation certificate hashes for additional device verification
+- **Automatic Blocking**: Prevents rapid account creation with the same device
+- **User-Friendly Messages**: Clear explanations when registration is blocked with countdown timers
+
+### 🛡️ AAGUID Anti-Spoofing Protection
+
+**Advanced Security Feature**: YuBlog implements industry-leading AAGUID spoofing protection to prevent sophisticated attacks:
+
+#### How AAGUID Spoofing Works (Attack Vector):
+1. **Packet Interception**: Attacker intercepts WebAuthn registration packets
+2. **AAGUID Modification**: Modifies the AAGUID in the attestation object
+3. **Cooldown Bypass**: Attempts to bypass the 34-day device registration cooldown
+4. **Multiple Account Creation**: Creates unlimited accounts with the same physical device
+
+#### Our Protection Mechanisms:
+- **Attestation Signature Verification**: Cryptographically verifies that attestation data hasn't been tampered with
+- **Certificate Chain Validation**: Validates attestation certificates against known manufacturer chains
+- **Trusted Device Database**: Maintains whitelist of known trusted security key manufacturers:
+  - YubiKey 5 Series (`149a20218ef6413396b881f8d5b7f1f5`)
+  - Windows Hello (`f8a011f38c0a4d15800617111f9edc7d`)
+  - Touch ID (`08987058cadc4b81b6e130de50dcbe96`)
+  - Chrome Touch ID (`9ddd1817af5a4672a2b93e3dd95000aa`)
+- **Device Fingerprinting**: Additional cryptographic device identification beyond AAGUID
+- **Security Level Assessment**: Categorizes devices as high/medium/low security based on verification
+- **Real-time Tamper Detection**: Detects and logs any attempts to modify device information
+
+#### Technical Implementation:
+```javascript
+// Enhanced device verification prevents AAGUID spoofing
+const deviceInfo = extractDeviceInfo(attestationObject);
+if (deviceInfo.securityLevel === 'high' && deviceInfo.attestationVerified) {
+  // Trusted device with verified attestation
+  await recordDeviceRegistration(deviceInfo);
+} else {
+  // Additional verification required for unverified devices
+  console.warn('Unverified device attempted registration');
+}
+```
+
+This protection ensures that even sophisticated attackers cannot bypass our spam prevention by manipulating device identification data.
+
+### 👑 Admin Privileges
+
+- **First User Admin**: The first user to register automatically receives administrator privileges
+- **Audit Trail**: All admin privilege grants are logged for security monitoring
+- **Database Trigger**: Automatic privilege assignment via PostgreSQL trigger
+
+### 📊 Enhanced Monitoring
+
+- **Device Registration Logs**: Track all device registration attempts and blocks
+- **Audit Events**: Comprehensive logging of security events including:
+  - Account creation attempts
+  - Device registration blocks
+  - Admin privilege grants
+  - Authentication attempts
+- **Security Analytics**: Monitor patterns to detect potential abuse
 
 ## 🆘 Troubleshooting
 

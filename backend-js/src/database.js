@@ -82,14 +82,29 @@ export const db = {
 
   // Credential operations
   async createCredential(credentialData) {
-    const { userId, credentialId, publicKey, counter, deviceName, aaguid } = credentialData;
+    const { 
+      userId, 
+      credentialId, 
+      publicKey, 
+      counter, 
+      deviceName, 
+      aaguid, 
+      attestationCertHash, 
+      deviceRegistrationId 
+    } = credentialData;
     const id = uuidv4();
     const query = `
-      INSERT INTO credentials (id, user_id, credential_id, public_key, counter, created_at, device_name, aaguid)
-      VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7)
+      INSERT INTO credentials (
+        id, user_id, credential_id, public_key, counter, created_at, 
+        device_name, aaguid, attestation_cert_hash, device_registration_id
+      )
+      VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9)
       RETURNING *
     `;
-    const values = [id, userId, credentialId, publicKey, counter || 0, deviceName, aaguid];
+    const values = [
+      id, userId, credentialId, publicKey, counter || 0, 
+      deviceName, aaguid, attestationCertHash, deviceRegistrationId
+    ];
     const result = await pool.query(query, values);
     return result.rows[0];
   },
@@ -134,6 +149,33 @@ export const db = {
       WHERE credential_id = $2
     `;
     await pool.query(query, [counter, credentialId]);
+  },
+
+  // Device registration tracking for spam prevention
+  async checkDeviceRegistrationEligibility(aaguid, attestationCertHash = null) {
+    const query = `
+      SELECT can_register, blocked_until, days_remaining
+      FROM can_device_register($1, $2)
+    `;
+    const result = await pool.query(query, [aaguid, attestationCertHash]);
+    return result.rows[0];
+  },
+
+  async recordDeviceRegistration(aaguid, attestationCertHash = null, deviceFingerprint = null, success = true) {
+    const query = `
+      SELECT record_device_registration($1, $2, $3, $4) as device_registration_id
+    `;
+    const result = await pool.query(query, [aaguid, attestationCertHash, deviceFingerprint, success]);
+    return result.rows[0].device_registration_id;
+  },
+
+  async getDeviceRegistrationStats(aaguid) {
+    const query = `
+      SELECT * FROM device_registrations 
+      WHERE aaguid = $1
+    `;
+    const result = await pool.query(query, [aaguid]);
+    return result.rows[0];
   },
 
   // Session operations
@@ -354,12 +396,12 @@ export const db = {
 
   // Audit logging
   async logAuditEvent(auditData) {
-    const { id, userId, action, resourceType, resourceId, details, ipAddress, userAgent, success } = auditData;
+    const { userId, action, resourceType, resourceId, details, ipAddress, userAgent, success } = auditData;
     const query = `
-      INSERT INTO audit_logs (id, user_id, action, resource_type, resource_id, details, ip_address, user_agent, success, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+      INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, ip_address, user_agent, success, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
     `;
-    const values = [id, userId, action, resourceType, resourceId, JSON.stringify(details), ipAddress, userAgent, success];
+    const values = [userId, action, resourceType, resourceId, JSON.stringify(details), ipAddress, userAgent, success];
     await pool.query(query, values);
   },
 
@@ -374,6 +416,25 @@ export const db = {
     const query = 'SELECT id, username, email, display_name, created_at FROM users ORDER BY created_at DESC LIMIT 10';
     const result = await pool.query(query);
     return result.rows;
+  },
+
+  // Enhanced session management methods
+  async updateSessionActivity(sessionId, ipAddress, userAgent) {
+    const query = `
+      UPDATE sessions 
+      SET last_activity = NOW(), ip_address = $2, user_agent = $3
+      WHERE id = $1
+    `;
+    await pool.query(query, [sessionId, ipAddress, userAgent]);
+  },
+
+  async updateSessionToken(sessionId, newTokenHash) {
+    const query = `
+      UPDATE sessions 
+      SET token_hash = $2, last_activity = NOW()
+      WHERE id = $1
+    `;
+    await pool.query(query, [sessionId, newTokenHash]);
   }
 };
 

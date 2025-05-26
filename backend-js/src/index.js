@@ -69,9 +69,29 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// JWT Configuration
-const JWT_SECRET = process.env.JWT_SECRET_KEY || 'your-super-secret-jwt-key';
+// JWT Configuration - Enhanced Security
+const JWT_SECRET = process.env.JWT_SECRET_KEY || (() => {
+  console.error('⚠️  CRITICAL SECURITY WARNING: JWT_SECRET_KEY not set in environment!');
+  console.error('⚠️  Using a secure random secret for this session only.');
+  console.error('⚠️  Set JWT_SECRET_KEY in production with: openssl rand -base64 64');
+  return crypto.randomBytes(64).toString('base64');
+})();
+
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
+const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
+
+// Enhanced security checks
+if (JWT_SECRET === 'your-super-secret-jwt-key') {
+  console.error('🚨 CRITICAL SECURITY VULNERABILITY: Default JWT secret detected!');
+  console.error('🚨 This is a major security risk in production!');
+  console.error('🚨 Generate a secure secret: openssl rand -base64 64');
+  process.exit(1);
+}
+
+if (JWT_SECRET.length < 32) {
+  console.error('🚨 SECURITY WARNING: JWT secret is too short!');
+  console.error('🚨 Use at least 32 characters for production security.');
+}
 
 // Utility functions
 function hashToken(token) {
@@ -164,27 +184,97 @@ app.post('/api/auth/webauthn/login/complete', strictLimiter, async (req, res) =>
   await completeAuthentication(req, res);
 });
 
-// JWT Authentication middleware
+// Enhanced JWT Authentication middleware with security features
 async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
-    return res.status(401).json({ error: 'Access token required' });
+    await logAuditEvent(null, 'authentication_attempt', false, req, { 
+      reason: 'missing_token',
+      endpoint: req.path 
+    });
+    return res.status(401).json({ 
+      error: 'Access token required',
+      code: 'TOKEN_MISSING'
+    });
   }
 
   try {
+    // Verify JWT signature and expiration
     const decoded = jwt.verify(token, JWT_SECRET);
-    const session = await db.getActiveSession(hashToken(token));
+    const tokenHash = hashToken(token);
+    
+    // Check if session exists and is active
+    const session = await db.getActiveSession(tokenHash);
     
     if (!session) {
-      return res.status(401).json({ error: 'Invalid or expired session' });
+      await logAuditEvent(decoded.userId, 'authentication_attempt', false, req, { 
+        reason: 'invalid_session',
+        endpoint: req.path 
+      });
+      return res.status(401).json({ 
+        error: 'Invalid or expired session',
+        code: 'SESSION_INVALID'
+      });
     }
     
-    req.user = session;
+    // Check for session hijacking indicators
+    const currentIP = req.ip;
+    const currentUserAgent = req.get('User-Agent');
+    
+    if (session.ip_address !== currentIP) {
+      console.warn(`⚠️ IP address mismatch for user ${session.user_id}: ${session.ip_address} vs ${currentIP}`);
+      await logAuditEvent(session.user_id, 'session_ip_mismatch', false, req, {
+        original_ip: session.ip_address,
+        current_ip: currentIP,
+        session_id: session.id
+      });
+      // In strict security mode, you might want to invalidate the session here
+    }
+    
+    // Update session activity
+    await db.updateSessionActivity(session.id, currentIP, currentUserAgent);
+    
+    // Check if token needs rotation (for enhanced security)
+    const tokenAge = Date.now() - new Date(session.created_at).getTime();
+    const rotationThreshold = 30 * 60 * 1000; // 30 minutes
+    
+    if (tokenAge > rotationThreshold && req.path !== '/api/auth/refresh') {
+      // Suggest token rotation in response header
+      res.setHeader('X-Token-Rotation-Suggested', 'true');
+    }
+    
+    req.user = {
+      id: session.user_id,
+      username: session.username || decoded.username,
+      sessionId: session.id,
+      tokenHash: tokenHash
+    };
+    
     next();
   } catch (error) {
-    return res.status(403).json({ error: 'Invalid token' });
+    let errorCode = 'TOKEN_INVALID';
+    let errorMessage = 'Invalid token';
+    
+    if (error.name === 'TokenExpiredError') {
+      errorCode = 'TOKEN_EXPIRED';
+      errorMessage = 'Token has expired';
+    } else if (error.name === 'JsonWebTokenError') {
+      errorCode = 'TOKEN_MALFORMED';
+      errorMessage = 'Token is malformed';
+    }
+    
+    await logAuditEvent(null, 'authentication_attempt', false, req, { 
+      reason: errorCode.toLowerCase(),
+      error: error.message,
+      endpoint: req.path 
+    });
+    
+    return res.status(403).json({ 
+      error: errorMessage,
+      code: errorCode
+    });
   }
 }
 
@@ -224,6 +314,50 @@ app.post('/api/auth/logout', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Logout error:', error);
     res.status(500).json({ error: 'Logout failed' });
+  }
+});
+
+// Token refresh endpoint for enhanced security
+app.post('/api/auth/refresh', authenticateToken, async (req, res) => {
+  try {
+    const { user } = req;
+    
+    // Generate new token
+    const newToken = jwt.sign(
+      { 
+        userId: user.id, 
+        username: user.username,
+        sessionId: user.sessionId
+      },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+    
+    // Hash new token
+    const newTokenHash = hashToken(newToken);
+    
+    // Update session with new token hash
+    await db.updateSessionToken(user.sessionId, newTokenHash);
+    
+    // Invalidate old token
+    await db.invalidateSession(user.tokenHash);
+    
+    await logAuditEvent(user.id, 'token_refresh', true, req, {
+      session_id: user.sessionId,
+      new_token_hash: newTokenHash.substring(0, 8) + '...' // Log only prefix for security
+    });
+    
+    res.json({
+      token: newToken,
+      expiresIn: JWT_EXPIRES_IN,
+      message: 'Token refreshed successfully'
+    });
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    await logAuditEvent(req.user?.id, 'token_refresh', false, req, {
+      error: error.message
+    });
+    res.status(500).json({ error: 'Token refresh failed' });
   }
 });
 

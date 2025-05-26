@@ -8,12 +8,12 @@ const HomePage = () => {
     {
       icon: Shield,
       title: 'Passwordless Security',
-      description: 'No passwords to remember or steal. Your YubiKey is your secure digital identity.',
+      description: 'No passwords to remember or steal. Your security key is your secure digital identity.',
     },
     {
       icon: Key,
-      title: 'YubiKey Integration',
-      description: 'Full WebAuthn/FIDO2 support with hardware security keys for ultimate protection.',
+      title: 'Hardware Security Key Integration',
+      description: 'Built-in support for FIDO2/WebAuthn compatible security keys from any manufacturer.',
     },
     {
       icon: Monitor,
@@ -65,11 +65,16 @@ const HomePage = () => {
               Without Passwords
             </h1>
             
-            <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto leading-relaxed">
-              YuBlog is a modern, self-hosted blogging platform that uses YubiKey and WebAuthn 
-              for passwordless authentication. Write, publish, and share your thoughts with 
+            <motion.p
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2, duration: 0.6 }}
+              className="text-xl text-secondary-600 mb-8 max-w-2xl mx-auto"
+            >
+              YuBlog is a modern, self-hosted blogging platform that uses security keys and WebAuthn
+              for passwordless authentication. Write, publish, and share your thoughts with
               military-grade security.
-            </p>
+            </motion.p>
             
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -186,12 +191,12 @@ const HomePage = () => {
                   <div className="mx-auto h-16 w-16 bg-primary-100 rounded-full flex items-center justify-center mb-6">
                     <Key className="h-8 w-8 text-primary-600" />
                   </div>
-                  <h3 className="text-xl font-semibold text-gray-900 mb-4">
-                    Your YubiKey is Your Password
+                  <h3 className="text-2xl font-bold text-secondary-800 mb-4">
+                    Your Security Key is Your Password
                   </h3>
-                  <p className="text-gray-600 mb-6">
-                    Simply touch your YubiKey to authenticate. No typing, no remembering, 
-                    no phishing attacks.
+                  <p className="text-secondary-600 mb-6 leading-relaxed">
+                    Simply touch your security key to authenticate. No typing, no remembering,
+                    no stolen passwords. Just pure, unbreakable security.
                   </p>
                   <div className="bg-white rounded-lg p-4 border border-primary-200">
                     <div className="flex items-center justify-center space-x-2 text-sm text-gray-500">
