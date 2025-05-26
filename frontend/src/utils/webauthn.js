@@ -139,6 +139,10 @@ export const registerWebAuthn = async (userData) => {
       throw new Error('Security error. Please make sure you\'re using HTTPS.');
     } else if (error.name === 'NotSupportedError') {
       throw new Error('WebAuthn is not supported on this device/browser.');
+    } else if (error.response?.status === 429 && error.response?.data?.reason === 'account_spam_prevention') {
+      // Device registration blocked due to spam prevention
+      const data = error.response.data;
+      throw new Error(data.message || `Device registration temporarily blocked. You can create a new account with this device in ${data.days_remaining} days.`);
     } else if (error.response?.data?.error) {
       throw new Error(error.response.data.error);
     }

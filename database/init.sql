@@ -14,10 +14,26 @@ CREATE TABLE users (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     is_active BOOLEAN DEFAULT TRUE,
+    is_admin BOOLEAN DEFAULT FALSE, -- Admin privileges for first user
     
     -- Security constraints
     CONSTRAINT valid_email CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
     CONSTRAINT valid_username CHECK (username ~* '^[A-Za-z0-9_-]{3,50}$')
+);
+
+-- Device registration tracking for spam prevention
+CREATE TABLE device_registrations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    aaguid TEXT NOT NULL, -- Authenticator AAGUID for device identification
+    attestation_cert_hash TEXT, -- Hash of attestation certificate for additional verification
+    device_fingerprint TEXT, -- Additional device identification data
+    first_registration_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_registration_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    registration_count INTEGER DEFAULT 1,
+    blocked_until TIMESTAMP WITH TIME ZONE, -- When device can register again
+    
+    -- Indexes for performance
+    UNIQUE(aaguid, attestation_cert_hash)
 );
 
 -- WebAuthn credentials for YubiKey authentication
@@ -31,6 +47,8 @@ CREATE TABLE credentials (
     last_used TIMESTAMP WITH TIME ZONE,
     device_name VARCHAR(255),
     aaguid TEXT, -- Authenticator AAGUID for device identification
+    attestation_cert_hash TEXT, -- Hash of attestation certificate
+    device_registration_id UUID REFERENCES device_registrations(id),
     
     -- Indexes for performance
     CONSTRAINT fk_credential_user FOREIGN KEY (user_id) REFERENCES users(id)
@@ -140,7 +158,8 @@ CREATE TABLE audit_logs (
         'login_attempt', 'login_success', 'logout', 'register_credential',
         'remove_credential', 'register_device', 'remove_device',
         'create_post', 'update_post', 'delete_post', 'publish_post',
-        'access_denied', 'rate_limit_exceeded'
+        'access_denied', 'rate_limit_exceeded', 'device_registration_blocked',
+        'admin_privilege_granted', 'account_creation_attempt'
     ))
 );
 
@@ -148,10 +167,16 @@ CREATE TABLE audit_logs (
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_username ON users(username);
 CREATE INDEX idx_users_active ON users(is_active);
+CREATE INDEX idx_users_admin ON users(is_admin);
+
+CREATE INDEX idx_device_registrations_aaguid ON device_registrations(aaguid);
+CREATE INDEX idx_device_registrations_blocked ON device_registrations(blocked_until) WHERE blocked_until IS NOT NULL;
+CREATE INDEX idx_device_registrations_cleanup ON device_registrations(last_registration_at);
 
 CREATE INDEX idx_credentials_user ON credentials(user_id);
 CREATE INDEX idx_credentials_id ON credentials(credential_id);
 CREATE INDEX idx_credentials_active ON credentials(user_id) WHERE last_used IS NOT NULL;
+CREATE INDEX idx_credentials_aaguid ON credentials(aaguid);
 
 CREATE INDEX idx_devices_user ON devices(user_id);
 CREATE INDEX idx_devices_active ON devices(user_id, is_active);
@@ -215,6 +240,138 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Function to check if device can register (34-day cooldown)
+CREATE OR REPLACE FUNCTION can_device_register(
+    p_aaguid TEXT,
+    p_attestation_cert_hash TEXT DEFAULT NULL
+)
+RETURNS TABLE (
+    can_register BOOLEAN,
+    blocked_until TIMESTAMP WITH TIME ZONE,
+    days_remaining INTEGER
+) AS $$
+DECLARE
+    device_record RECORD;
+    cooldown_period INTERVAL := '34 days';
+BEGIN
+    -- Look for existing device registration
+    SELECT * INTO device_record
+    FROM device_registrations dr
+    WHERE dr.aaguid = p_aaguid 
+    AND (p_attestation_cert_hash IS NULL OR dr.attestation_cert_hash = p_attestation_cert_hash);
+    
+    -- If no previous registration, allow
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT TRUE, NULL::TIMESTAMP WITH TIME ZONE, 0;
+        RETURN;
+    END IF;
+    
+    -- Check if device is currently blocked
+    IF device_record.blocked_until IS NOT NULL AND device_record.blocked_until > NOW() THEN
+        RETURN QUERY SELECT 
+            FALSE,
+            device_record.blocked_until,
+            EXTRACT(DAYS FROM (device_record.blocked_until - NOW()))::INTEGER;
+        RETURN;
+    END IF;
+    
+    -- Check if enough time has passed since last registration
+    IF device_record.last_registration_at + cooldown_period > NOW() THEN
+        RETURN QUERY SELECT 
+            FALSE,
+            device_record.last_registration_at + cooldown_period,
+            EXTRACT(DAYS FROM ((device_record.last_registration_at + cooldown_period) - NOW()))::INTEGER;
+        RETURN;
+    END IF;
+    
+    -- Device can register
+    RETURN QUERY SELECT TRUE, NULL::TIMESTAMP WITH TIME ZONE, 0;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to record device registration attempt
+CREATE OR REPLACE FUNCTION record_device_registration(
+    p_aaguid TEXT,
+    p_attestation_cert_hash TEXT DEFAULT NULL,
+    p_device_fingerprint TEXT DEFAULT NULL,
+    p_success BOOLEAN DEFAULT TRUE
+)
+RETURNS UUID AS $$
+DECLARE
+    device_reg_id UUID;
+    cooldown_period INTERVAL := '34 days';
+BEGIN
+    -- Insert or update device registration record
+    INSERT INTO device_registrations (
+        aaguid, 
+        attestation_cert_hash, 
+        device_fingerprint,
+        first_registration_at,
+        last_registration_at,
+        registration_count,
+        blocked_until
+    )
+    VALUES (
+        p_aaguid,
+        p_attestation_cert_hash,
+        p_device_fingerprint,
+        NOW(),
+        NOW(),
+        1,
+        CASE WHEN p_success THEN NOW() + cooldown_period ELSE NULL END
+    )
+    ON CONFLICT (aaguid, attestation_cert_hash)
+    DO UPDATE SET
+        last_registration_at = NOW(),
+        registration_count = device_registrations.registration_count + 1,
+        blocked_until = CASE WHEN p_success THEN NOW() + cooldown_period ELSE device_registrations.blocked_until END,
+        device_fingerprint = COALESCE(p_device_fingerprint, device_registrations.device_fingerprint)
+    RETURNING id INTO device_reg_id;
+    
+    RETURN device_reg_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to grant admin privileges to first user
+CREATE OR REPLACE FUNCTION grant_admin_to_first_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Check if this is the first user
+    IF (SELECT COUNT(*) FROM users WHERE id != NEW.id) = 0 THEN
+        NEW.is_admin := TRUE;
+        
+        -- Note: We'll log this after the user is inserted via a separate trigger
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger to grant admin privileges to first user
+CREATE TRIGGER grant_admin_to_first_user_trigger
+    BEFORE INSERT ON users
+    FOR EACH ROW EXECUTE FUNCTION grant_admin_to_first_user();
+
+-- Function to log admin privilege grant (separate trigger to avoid recursion)
+CREATE OR REPLACE FUNCTION log_admin_privilege_grant()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- If user was granted admin privileges, log it
+    IF NEW.is_admin = TRUE AND (OLD IS NULL OR OLD.is_admin = FALSE) THEN
+        INSERT INTO audit_logs (user_id, action, success, details)
+        VALUES (NEW.id, 'admin_privilege_granted', TRUE, 
+               jsonb_build_object('reason', 'first_user_registration', 'username', NEW.username));
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger to log admin privilege grants
+CREATE TRIGGER log_admin_privilege_grant_trigger
+    AFTER INSERT OR UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION log_admin_privilege_grant();
+
 -- Row Level Security (RLS) policies
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
@@ -262,29 +419,7 @@ GRANT USAGE ON SCHEMA public TO authenticated_users;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated_users;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated_users;
 
--- Sample data for testing (remove in production)
-INSERT INTO users (username, email, display_name) VALUES 
-('admin', 'admin@yublog.local', 'Administrator'),
-('demo', 'demo@yublog.local', 'Demo User');
-
--- Initial blog post
-INSERT INTO posts (title, slug, content, excerpt, author_id, published)
-SELECT 
-    'Welcome to YuBlog',
-    'welcome-to-yublog',
-    '<h1>Welcome to YuBlog</h1><p>This is a secure, passwordless blogging platform that uses YubiKey and QR code authentication.</p><p>Key features:</p><ul><li>No passwords stored anywhere</li><li>YubiKey (FIDO2/WebAuthn) authentication</li><li>QR code mobile authentication</li><li>Self-hosted and secure</li></ul>',
-    'Welcome to YuBlog - a secure, passwordless blogging platform.',
-    users.id,
-    TRUE
-FROM users WHERE username = 'admin';
-
--- Create initial tag
-INSERT INTO tags (name) VALUES ('Security'), ('Technology'), ('Privacy');
-
--- Link post with tags
-INSERT INTO post_tags (post_id, tag_id)
-SELECT p.id, t.id
-FROM posts p, tags t
-WHERE p.slug = 'welcome-to-yublog' AND t.name IN ('Security', 'Technology');
+-- Create initial tags (no sample users - fresh start)
+INSERT INTO tags (name) VALUES ('Security'), ('Technology'), ('Privacy'), ('WebAuthn'), ('FIDO2');
 
 COMMIT; 

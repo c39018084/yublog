@@ -6,9 +6,12 @@ A self-hosted, highly secure blogging platform with passwordless authentication 
 
 - **Passwordless Authentication**: No passwords stored or used anywhere
 - **YubiKey Support**: Full FIDO2/WebAuthn hardware security key integration
+- **Account Spam Prevention**: 34-day cooldown between device registrations to prevent account spamming
+- **Device Registration Tracking**: AAGUID-based device identification and registration limits
+- **Admin Privileges**: First registered user automatically receives administrator privileges
 - **End-to-End Encryption**: TLS 1.3 with modern cipher suites
 - **Rate Limiting**: Protection against brute force attacks
-- **Audit Logging**: Complete security event tracking
+- **Audit Logging**: Complete security event tracking with device registration monitoring
 - **Session Management**: Secure JWT-based sessions with Redis storage
 
 ## ⚠️ IMPORTANT SECURITY NOTICE
@@ -165,6 +168,20 @@ make logs      # Show service logs
 make clean     # Clean up Docker resources
 ```
 
+### Database Reset (Fresh Start)
+
+To reset the database and apply the new security features:
+
+```bash
+# Reset database with new security schema
+./scripts/reset-database.sh
+
+# Or manually with Docker
+docker-compose down -v
+docker-compose up -d db redis
+./scripts/reset-database.sh
+```
+
 ## 🔧 Configuration
 
 ### Environment Variables
@@ -194,9 +211,13 @@ For production deployment:
 ### ✅ **Currently Implemented:**
 - WebAuthn/FIDO2 authentication (YubiKey, Touch ID, Windows Hello)
 - React frontend with modern UI
-- Flask backend with security best practices
+- Express.js backend with native WebAuthn implementation
+- Flask backend alternative with security best practices
 - Blog creation, editing, and management
 - User profile management
+- **Device registration spam prevention (34-day cooldown)**
+- **Automatic admin privileges for first user**
+- **AAGUID-based device tracking and identification**
 - Comprehensive security headers
 - Rate limiting and audit logging
 - Docker containerization
@@ -211,6 +232,7 @@ For production deployment:
 
 ## 📚 Documentation
 
+- [Security Features](docs/SECURITY_FEATURES.md) - **NEW: Account spam prevention & admin privileges**
 - [Technical Design](docs/TECHNICAL_DESIGN.md)
 - [Docker Setup Guide](docs/Docker/)
 
@@ -224,6 +246,32 @@ This project prioritizes security:
 - Comprehensive audit logging
 - Security headers and CSP
 - Regular security reviews
+
+### 🔐 Account Spam Prevention
+
+YuBlog implements sophisticated device-based account spam prevention:
+
+- **Device Identification**: Uses AAGUID (Authenticator Attestation GUID) to uniquely identify security keys
+- **34-Day Cooldown**: Each device can only create one account every 34 days
+- **Attestation Tracking**: Tracks attestation certificate hashes for additional device verification
+- **Automatic Blocking**: Prevents rapid account creation with the same device
+- **User-Friendly Messages**: Clear explanations when registration is blocked with countdown timers
+
+### 👑 Admin Privileges
+
+- **First User Admin**: The first user to register automatically receives administrator privileges
+- **Audit Trail**: All admin privilege grants are logged for security monitoring
+- **Database Trigger**: Automatic privilege assignment via PostgreSQL trigger
+
+### 📊 Enhanced Monitoring
+
+- **Device Registration Logs**: Track all device registration attempts and blocks
+- **Audit Events**: Comprehensive logging of security events including:
+  - Account creation attempts
+  - Device registration blocks
+  - Admin privilege grants
+  - Authentication attempts
+- **Security Analytics**: Monitor patterns to detect potential abuse
 
 ## 🆘 Troubleshooting
 

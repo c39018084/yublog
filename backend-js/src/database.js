@@ -82,14 +82,29 @@ export const db = {
 
   // Credential operations
   async createCredential(credentialData) {
-    const { userId, credentialId, publicKey, counter, deviceName, aaguid } = credentialData;
+    const { 
+      userId, 
+      credentialId, 
+      publicKey, 
+      counter, 
+      deviceName, 
+      aaguid, 
+      attestationCertHash, 
+      deviceRegistrationId 
+    } = credentialData;
     const id = uuidv4();
     const query = `
-      INSERT INTO credentials (id, user_id, credential_id, public_key, counter, created_at, device_name, aaguid)
-      VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7)
+      INSERT INTO credentials (
+        id, user_id, credential_id, public_key, counter, created_at, 
+        device_name, aaguid, attestation_cert_hash, device_registration_id
+      )
+      VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9)
       RETURNING *
     `;
-    const values = [id, userId, credentialId, publicKey, counter || 0, deviceName, aaguid];
+    const values = [
+      id, userId, credentialId, publicKey, counter || 0, 
+      deviceName, aaguid, attestationCertHash, deviceRegistrationId
+    ];
     const result = await pool.query(query, values);
     return result.rows[0];
   },
@@ -134,6 +149,33 @@ export const db = {
       WHERE credential_id = $2
     `;
     await pool.query(query, [counter, credentialId]);
+  },
+
+  // Device registration tracking for spam prevention
+  async checkDeviceRegistrationEligibility(aaguid, attestationCertHash = null) {
+    const query = `
+      SELECT can_register, blocked_until, days_remaining
+      FROM can_device_register($1, $2)
+    `;
+    const result = await pool.query(query, [aaguid, attestationCertHash]);
+    return result.rows[0];
+  },
+
+  async recordDeviceRegistration(aaguid, attestationCertHash = null, deviceFingerprint = null, success = true) {
+    const query = `
+      SELECT record_device_registration($1, $2, $3, $4) as device_registration_id
+    `;
+    const result = await pool.query(query, [aaguid, attestationCertHash, deviceFingerprint, success]);
+    return result.rows[0].device_registration_id;
+  },
+
+  async getDeviceRegistrationStats(aaguid) {
+    const query = `
+      SELECT * FROM device_registrations 
+      WHERE aaguid = $1
+    `;
+    const result = await pool.query(query, [aaguid]);
+    return result.rows[0];
   },
 
   // Session operations

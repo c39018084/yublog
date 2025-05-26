@@ -187,6 +187,33 @@ function coseKeyToPem(coseKey) {
   throw new Error('Unsupported key type or curve');
 }
 
+function extractDeviceInfo(attestationObject) {
+  try {
+    const authData = parseAuthenticatorData(attestationObject.authData);
+    const aaguid = authData.attestedCredentialData?.aaguid;
+    
+    // Extract attestation certificate hash if available
+    let attestationCertHash = null;
+    if (attestationObject.attStmt && attestationObject.attStmt.x5c && attestationObject.attStmt.x5c.length > 0) {
+      const cert = attestationObject.attStmt.x5c[0];
+      attestationCertHash = sha256(cert).toString('hex');
+    }
+    
+    return {
+      aaguid: aaguid ? aaguid.toString('hex') : null,
+      attestationCertHash,
+      deviceFingerprint: null // Could be enhanced with additional device identification
+    };
+  } catch (error) {
+    console.warn('Failed to extract device info:', error);
+    return {
+      aaguid: null,
+      attestationCertHash: null,
+      deviceFingerprint: null
+    };
+  }
+}
+
 /**
  * Generate registration options for WebAuthn
  */
@@ -495,9 +522,58 @@ export async function completeRegistration(req, res) {
       await req.app.locals.redis.del(challengeKey);
       return res.status(400).json({ error: verification.error || 'Registration verification failed' });
     }
+
+    // Extract device information for spam prevention
+    const attestationObjectBuffer = base64URLDecode(credential.response.attestationObject);
+    const attestationObject = cborDecode(attestationObjectBuffer);
+    const deviceInfo = extractDeviceInfo(attestationObject);
+    
+    // Check if device can register (34-day cooldown)
+    const db = req.app.locals.db;
+    if (deviceInfo.aaguid) {
+      const eligibility = await db.checkDeviceRegistrationEligibility(
+        deviceInfo.aaguid, 
+        deviceInfo.attestationCertHash
+      );
+      
+      if (!eligibility.can_register) {
+        // Record failed attempt
+        await db.recordDeviceRegistration(
+          deviceInfo.aaguid,
+          deviceInfo.attestationCertHash,
+          deviceInfo.deviceFingerprint,
+          false
+        );
+        
+        // Log audit event
+        await db.logAuditEvent({
+          action: 'device_registration_blocked',
+          resourceType: 'device',
+          details: {
+            aaguid: deviceInfo.aaguid,
+            blocked_until: eligibility.blocked_until,
+            days_remaining: eligibility.days_remaining,
+            reason: 'account_spam_prevention'
+          },
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent'),
+          success: false
+        });
+        
+        await req.app.locals.redis.del(challengeKey);
+        
+        const blockedDate = new Date(eligibility.blocked_until).toLocaleDateString();
+        return res.status(429).json({ 
+          error: 'Device registration temporarily blocked',
+          message: `This device has recently been used to create an account. For security reasons to prevent account spamming, you can create a new account with this device on ${blockedDate} (${eligibility.days_remaining} days remaining).`,
+          blocked_until: eligibility.blocked_until,
+          days_remaining: eligibility.days_remaining,
+          reason: 'account_spam_prevention'
+        });
+      }
+    }
     
     // Create user in database
-    const db = req.app.locals.db;
     const newUser = await db.createUser({
       id: user.id,
       username: user.username,
@@ -505,13 +581,27 @@ export async function completeRegistration(req, res) {
       displayName: user.displayName
     });
     
+    // Record successful device registration
+    let deviceRegistrationId = null;
+    if (deviceInfo.aaguid) {
+      deviceRegistrationId = await db.recordDeviceRegistration(
+        deviceInfo.aaguid,
+        deviceInfo.attestationCertHash,
+        deviceInfo.deviceFingerprint,
+        true
+      );
+    }
+    
     // Store credential in database
     const credentialData = {
       userId: newUser.id,
       credentialId: verification.registrationInfo.credentialId,
       publicKey: verification.registrationInfo.publicKeyPEM,
       counter: verification.registrationInfo.signCount,
-      deviceName: 'YubiKey',
+      deviceName: 'Security Key',
+      aaguid: deviceInfo.aaguid,
+      attestationCertHash: deviceInfo.attestationCertHash,
+      deviceRegistrationId: deviceRegistrationId
     };
     
     console.log('=== SAVING CREDENTIAL TO DATABASE ===');
@@ -522,6 +612,23 @@ export async function completeRegistration(req, res) {
     console.log('Saved credential record:', credentialRecord);
     console.log('Credential ID in saved record:', credentialRecord.credential_id);
     console.log('=== CREDENTIAL SAVED ===');
+    
+    // Log successful account creation
+    await db.logAuditEvent({
+      userId: newUser.id,
+      action: 'account_creation_attempt',
+      resourceType: 'user',
+      resourceId: newUser.id,
+      details: {
+        username: newUser.username,
+        aaguid: deviceInfo.aaguid,
+        device_registration_id: deviceRegistrationId,
+        is_first_user: newUser.is_admin || false
+      },
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent'),
+      success: true
+    });
     
     // Clean up challenge
     await req.app.locals.redis.del(challengeKey);
