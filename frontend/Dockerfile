@@ -13,8 +13,11 @@ COPY package*.json ./
 # Install dependencies
 RUN npm ci
 
-# Copy source code
-COPY . .
+# Copy public assets (changes less frequently than src)
+COPY public/ ./public/
+
+# Copy configuration files
+COPY tailwind.config.js postcss.config.js ./
 
 # Build arguments
 ARG REACT_APP_API_URL
@@ -23,6 +26,9 @@ ARG REACT_APP_WEBAUTHN_RP_ID
 # Set environment variables
 ENV REACT_APP_API_URL=$REACT_APP_API_URL
 ENV REACT_APP_WEBAUTHN_RP_ID=$REACT_APP_WEBAUTHN_RP_ID
+
+# Copy source code last (changes most frequently)
+COPY src/ ./src/
 
 # Expose port
 EXPOSE 3000

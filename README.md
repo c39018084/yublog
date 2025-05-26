@@ -44,7 +44,6 @@ A self-hosted, highly secure blogging platform with passwordless authentication 
 yublog/
 ├── frontend/              # React frontend application
 │   ├── public/           # Static assets
-│   ├── src/              # React components and logic
 │   │   ├── components/   # Reusable UI components
 │   │   ├── pages/        # Page components
 │   │   ├── hooks/        # Custom React hooks
@@ -77,6 +76,25 @@ yublog/
 
 ## 🚀 Quick Start
 
+### Automated Setup (Recommended)
+
+The easiest way to get started with development:
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/yublog.git
+cd yublog
+
+# Run automated setup (creates .env, SSL certs, directories)
+make setup
+
+# Start all services
+make up
+
+# Check status
+docker-compose ps
+```
+
 ### Option 1: Full Stack with Express.js Backend (Recommended)
 
 The default setup uses Express.js with native WebAuthn implementation:
@@ -86,9 +104,8 @@ The default setup uses Express.js with native WebAuthn implementation:
 git clone https://github.com/yourusername/yublog.git
 cd yublog
 
-# Copy environment file and configure
-cp environment.example .env
-# Edit .env with your settings
+# Set up development environment
+./scripts/setup-dev.sh
 
 # Start the full stack (Express.js + React + PostgreSQL + Redis + Nginx)
 docker-compose up -d
@@ -133,6 +150,20 @@ npm start
 - Frontend: https://localhost (or http://localhost:3000 in dev mode)
 - API Documentation: https://localhost/api/health
 - Database: localhost:5432 (in dev mode)
+
+### Development Commands
+
+Use the included Makefile for common development tasks:
+
+```bash
+make help      # Show all available commands
+make setup     # Set up development environment
+make up        # Start all services
+make down      # Stop all services
+make rebuild   # Rebuild and restart (useful after code changes)
+make logs      # Show service logs
+make clean     # Clean up Docker resources
+```
 
 ## 🔧 Configuration
 
