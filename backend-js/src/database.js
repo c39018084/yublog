@@ -396,12 +396,12 @@ export const db = {
 
   // Audit logging
   async logAuditEvent(auditData) {
-    const { id, userId, action, resourceType, resourceId, details, ipAddress, userAgent, success } = auditData;
+    const { userId, action, resourceType, resourceId, details, ipAddress, userAgent, success } = auditData;
     const query = `
-      INSERT INTO audit_logs (id, user_id, action, resource_type, resource_id, details, ip_address, user_agent, success, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+      INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, ip_address, user_agent, success, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
     `;
-    const values = [id, userId, action, resourceType, resourceId, JSON.stringify(details), ipAddress, userAgent, success];
+    const values = [userId, action, resourceType, resourceId, JSON.stringify(details), ipAddress, userAgent, success];
     await pool.query(query, values);
   },
 
@@ -416,6 +416,25 @@ export const db = {
     const query = 'SELECT id, username, email, display_name, created_at FROM users ORDER BY created_at DESC LIMIT 10';
     const result = await pool.query(query);
     return result.rows;
+  },
+
+  // Enhanced session management methods
+  async updateSessionActivity(sessionId, ipAddress, userAgent) {
+    const query = `
+      UPDATE sessions 
+      SET last_activity = NOW(), ip_address = $2, user_agent = $3
+      WHERE id = $1
+    `;
+    await pool.query(query, [sessionId, ipAddress, userAgent]);
+  },
+
+  async updateSessionToken(sessionId, newTokenHash) {
+    const query = `
+      UPDATE sessions 
+      SET token_hash = $2, last_activity = NOW()
+      WHERE id = $1
+    `;
+    await pool.query(query, [sessionId, newTokenHash]);
   }
 };
 

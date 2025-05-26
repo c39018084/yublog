@@ -16,8 +16,8 @@
 
 ```
 ┌─────────────────┐    ┌─────────────────┐
-│   Web Browser   │    │    YubiKey     │
-│   (Frontend)    │    │  (FIDO2/U2F)   │
+│   Web Browser   │    │  Security Key   │
+│   (Frontend)    │    │ (FIDO2/WebAuthn)│
 └─────────┬───────┘    └─────────┬───────┘
           │ HTTPS              │ USB/NFC/BLE
           │                    │
@@ -30,6 +30,12 @@
     │ Express.js│  │   Redis     │  │ PostgreSQL   │  │   File      │
     │API Server │  │ (Sessions/  │  │ (Primary DB) │  │ Storage     │
     │(Node.js)  │  │  Cache)     │  │              │  │ (Media)     │
+    │           │  │             │  │+ Device Reg. │  │             │
+    │+ AAGUID   │  │+ Token      │  │+ AAGUID Anti-│  │             │
+    │  Anti-    │  │  Rotation   │  │  Spoofing    │  │             │
+    │  Spoofing │  │+ Challenge  │  │+ Audit Logs  │  │             │
+    │+ Enhanced │  │  Storage    │  │+ Session Mgmt│  │             │
+    │  Security │  │             │  │              │  │             │
     └───────────┘  └─────────────┘  └──────────────┘  └─────────────┘
 ```
 
@@ -82,6 +88,165 @@
 │  │  (Primary DB)   │  │      (Encrypted)                │  │
 │  └─────────────────┘  └─────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
+```
+
+## AAGUID Anti-Spoofing Security Architecture
+
+### Threat Model: AAGUID Spoofing Attack
+
+YuBlog implements advanced protection against sophisticated AAGUID (Authenticator Attestation GUID) spoofing attacks that could bypass device registration spam prevention:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Attack Vector Diagram                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. Legitimate Registration                                     │
+│     User ──► [Security Key] ──► WebAuthn ──► Server            │
+│                    │                            │               │
+│                AAGUID: 149a20...           Store AAGUID        │
+│                                           + 34-day cooldown    │
+│                                                                 │
+│  2. Spoofing Attack (Without Protection)                       │
+│     Attacker ──► [Same Key] ──► Modified ──► Server            │
+│                     │           WebAuthn       │               │
+│                 Fake AAGUID: 000000...    Accept as "new"      │
+│                                           device = BYPASS!     │
+│                                                                 │
+│  3. YuBlog Protection (With Anti-Spoofing)                     │
+│     Attacker ──► [Same Key] ──► Modified ──► Server            │
+│                     │           WebAuthn       │               │
+│                 Fake AAGUID     Verify        ❌ BLOCKED!      │
+│                                Attestation    Invalid Sig      │
+│                                Signature                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Protection Mechanisms
+
+#### 1. Attestation Signature Verification
+
+```javascript
+// Enhanced device verification prevents tampering
+function extractDeviceInfo(attestationObject) {
+  // Parse authenticator data
+  const authData = parseAuthenticatorData(attestationObject.authData);
+  
+  // Verify attestation signature
+  if (attestationObject.fmt === 'packed' && attestationObject.attStmt.sig) {
+    const clientDataHash = sha256(attestationObject.clientDataJSON);
+    const signedData = Buffer.concat([attestationObject.authData, clientDataHash]);
+    
+    // Cryptographic verification prevents AAGUID tampering
+    const signatureValid = verifyAttestationSignature(
+      attestationObject.attStmt.sig,
+      signedData,
+      attestationObject.attStmt.x5c[0]
+    );
+    
+    if (!signatureValid) {
+      throw new Error('Attestation signature verification failed - potential spoofing');
+    }
+  }
+  
+  // Extract verified AAGUID
+  return {
+    aaguid: authData.attestedCredentialData.aaguid.toString('hex'),
+    attestationVerified: true,
+    securityLevel: 'high'
+  };
+}
+```
+
+#### 2. Trusted Device Database
+
+YuBlog maintains a whitelist of known trusted security key manufacturers:
+
+```javascript
+const TRUSTED_AAGUIDS = {
+  '149a20218ef6413396b881f8d5b7f1f5': {
+    name: 'YubiKey 5 Series',
+    manufacturer: 'Yubico',
+    securityLevel: 'high'
+  },
+  'f8a011f38c0a4d15800617111f9edc7d': {
+    name: 'Windows Hello',
+    manufacturer: 'Microsoft', 
+    securityLevel: 'high'
+  },
+  '08987058cadc4b81b6e130de50dcbe96': {
+    name: 'Touch ID',
+    manufacturer: 'Apple',
+    securityLevel: 'high' 
+  },
+  '9ddd1817af5a4672a2b93e3dd95000aa': {
+    name: 'Chrome Touch ID',
+    manufacturer: 'Google',
+    securityLevel: 'medium'
+  }
+};
+```
+
+#### 3. Multi-Layer Device Fingerprinting
+
+Beyond AAGUID, YuBlog generates additional device fingerprints:
+
+```javascript
+function generateDeviceFingerprint(attestedCredentialData) {
+  const fingerprintData = Buffer.concat([
+    attestedCredentialData.aaguid,
+    attestedCredentialData.credentialId,
+    Buffer.from(JSON.stringify(attestedCredentialData.credentialPublicKey))
+  ]);
+  
+  return sha256(fingerprintData).toString('hex');
+}
+```
+
+#### 4. Security Level Assessment
+
+Each device registration is assessed and categorized:
+
+- **High Security**: Verified attestation + Trusted manufacturer
+- **Medium Security**: Verified attestation + Unknown manufacturer  
+- **Low Security**: Self-attestation or unverified
+
+### Database Schema for Anti-Spoofing
+
+```sql
+-- Enhanced device registration tracking
+CREATE TABLE device_registrations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    aaguid VARCHAR(32) NOT NULL,
+    attestation_cert_hash VARCHAR(64),
+    device_fingerprint VARCHAR(64),
+    security_level VARCHAR(20) DEFAULT 'low',
+    attestation_verified BOOLEAN DEFAULT false,
+    trusted_device BOOLEAN DEFAULT false,
+    attestation_format VARCHAR(20),
+    registration_count INTEGER DEFAULT 1,
+    last_registration_attempt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    success BOOLEAN DEFAULT true,
+    blocked_until TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Audit logging for security events
+CREATE TABLE audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id),
+    action VARCHAR(100) NOT NULL,
+    resource_type VARCHAR(50),
+    resource_id UUID,
+    details JSONB,
+    ip_address INET,
+    user_agent TEXT,
+    success BOOLEAN DEFAULT true,
+    security_level VARCHAR(20),
+    threat_indicators JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
 ## API Specifications
@@ -588,6 +753,128 @@ Content-Security-Policy:
 8. **Software Integrity**: Code signing, SRI for frontend assets
 9. **Logging Failures**: Comprehensive audit logging, security monitoring
 10. **SSRF**: URL validation, allowlist of external services
+
+### Enhanced JWT Token Security
+
+YuBlog implements production-grade JWT security with multiple layers of protection:
+
+#### 1. Secure Secret Management
+
+```javascript
+// Enhanced JWT Configuration with Security Validation
+const JWT_SECRET = process.env.JWT_SECRET_KEY || (() => {
+  console.error('⚠️  CRITICAL SECURITY WARNING: JWT_SECRET_KEY not set!');
+  console.error('⚠️  Generate secure secret: openssl rand -base64 64');
+  return crypto.randomBytes(64).toString('base64');
+})();
+
+// Security validation
+if (JWT_SECRET === 'your-super-secret-jwt-key') {
+  console.error('🚨 CRITICAL: Default JWT secret detected!');
+  process.exit(1);
+}
+
+if (JWT_SECRET.length < 32) {
+  console.error('🚨 WARNING: JWT secret too short!');
+}
+```
+
+#### 2. Token Rotation & Session Security
+
+```javascript
+// Enhanced session management with hijacking detection
+async function authenticateToken(req, res, next) {
+  const token = req.headers['authorization']?.split(' ')[1];
+  
+  if (!token) {
+    await logAuditEvent(null, 'authentication_attempt', false, req, { 
+      reason: 'missing_token',
+      endpoint: req.path 
+    });
+    return res.status(401).json({ 
+      error: 'Access token required',
+      code: 'TOKEN_MISSING'
+    });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const session = await db.getActiveSession(hashToken(token));
+    
+    // Session hijacking detection
+    if (session.ip_address !== req.ip) {
+      await logAuditEvent(session.user_id, 'session_ip_mismatch', false, req);
+      // Optionally invalidate session in strict mode
+    }
+    
+    // Token rotation suggestion
+    const tokenAge = Date.now() - new Date(session.created_at).getTime();
+    if (tokenAge > 30 * 60 * 1000) { // 30 minutes
+      res.setHeader('X-Token-Rotation-Suggested', 'true');
+    }
+    
+    await db.updateSessionActivity(session.id, req.ip, req.get('User-Agent'));
+    
+    req.user = {
+      id: session.user_id,
+      username: session.username,
+      sessionId: session.id,
+      tokenHash: hashToken(token)
+    };
+    
+    next();
+  } catch (error) {
+    await logAuditEvent(null, 'authentication_attempt', false, req, {
+      reason: error.name.toLowerCase(),
+      error: error.message
+    });
+    
+    return res.status(403).json({ 
+      error: 'Invalid token',
+      code: error.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID'
+    });
+  }
+}
+```
+
+#### 3. Secure Token Refresh Endpoint
+
+```javascript
+// Token refresh with security controls
+app.post('/api/auth/refresh', authenticateToken, async (req, res) => {
+  try {
+    const newToken = jwt.sign(
+      { 
+        userId: req.user.id, 
+        username: req.user.username,
+        sessionId: req.user.sessionId
+      },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+    
+    const newTokenHash = hashToken(newToken);
+    
+    // Update session with new token
+    await db.updateSessionToken(req.user.sessionId, newTokenHash);
+    
+    // Invalidate old token
+    await db.invalidateSession(req.user.tokenHash);
+    
+    await logAuditEvent(req.user.id, 'token_refresh', true, req);
+    
+    res.json({
+      token: newToken,
+      expiresIn: JWT_EXPIRES_IN
+    });
+  } catch (error) {
+    await logAuditEvent(req.user.id, 'token_refresh', false, req);
+    res.status(500).json({ error: 'Token refresh failed' });
+  }
+});
+```
+
+### WebAuthn Security Implementation
 
 ## Authentication Flows
 

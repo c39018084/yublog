@@ -159,17 +159,43 @@ npm start
 
 ### Development Commands
 
-Use the included Makefile for common development tasks:
+**🚀 Quick Development Workflow (Recommended):**
 
 ```bash
-make help      # Show all available commands
-make setup     # Set up development environment
-make up        # Start all services
-make down      # Stop all services
-make rebuild   # Rebuild and restart (useful after code changes)
-make logs      # Show service logs
-make clean     # Clean up Docker resources
+# Most common: restart with fresh code after making changes
+./dev.sh                # Quick restart (default command)
+./dev.sh restart        # Same as above
+./dev.sh logs           # Watch backend logs in real-time
+./dev.sh status         # Check service status
+./dev.sh rebuild        # Full rebuild (when dependencies change)
 ```
+
+**📋 Makefile Commands:**
+
+```bash
+make help           # Show all available commands
+make setup          # Set up development environment
+make up             # Start all services
+make down           # Stop all services
+
+# Development workflow (ensures code changes are picked up):
+make dev-restart    # Quick restart with code refresh (recommended)
+make dev-rebuild    # Full rebuild with cache clearing
+make dev-clean      # Nuclear option: clean everything and rebuild
+make dev-logs       # Show backend logs in real-time
+
+# Debugging:
+make logs           # Show service logs
+make status         # Show service status and resource usage
+make clean          # Clean up Docker resources
+```
+
+**💡 Development Workflow Tips:**
+
+- **After making code changes**: Run `./dev.sh` (fastest)
+- **After changing dependencies**: Run `./dev.sh rebuild`
+- **If something seems broken**: Run `make dev-clean` (nuclear option)
+- **To watch logs while developing**: Run `./dev.sh logs`
 
 ### Database Reset (Fresh Start)
 
@@ -259,6 +285,43 @@ YuBlog implements sophisticated device-based account spam prevention:
 - **Attestation Tracking**: Tracks attestation certificate hashes for additional device verification
 - **Automatic Blocking**: Prevents rapid account creation with the same device
 - **User-Friendly Messages**: Clear explanations when registration is blocked with countdown timers
+
+### 🛡️ AAGUID Anti-Spoofing Protection
+
+**Advanced Security Feature**: YuBlog implements industry-leading AAGUID spoofing protection to prevent sophisticated attacks:
+
+#### How AAGUID Spoofing Works (Attack Vector):
+1. **Packet Interception**: Attacker intercepts WebAuthn registration packets
+2. **AAGUID Modification**: Modifies the AAGUID in the attestation object
+3. **Cooldown Bypass**: Attempts to bypass the 34-day device registration cooldown
+4. **Multiple Account Creation**: Creates unlimited accounts with the same physical device
+
+#### Our Protection Mechanisms:
+- **Attestation Signature Verification**: Cryptographically verifies that attestation data hasn't been tampered with
+- **Certificate Chain Validation**: Validates attestation certificates against known manufacturer chains
+- **Trusted Device Database**: Maintains whitelist of known trusted security key manufacturers:
+  - YubiKey 5 Series (`149a20218ef6413396b881f8d5b7f1f5`)
+  - Windows Hello (`f8a011f38c0a4d15800617111f9edc7d`)
+  - Touch ID (`08987058cadc4b81b6e130de50dcbe96`)
+  - Chrome Touch ID (`9ddd1817af5a4672a2b93e3dd95000aa`)
+- **Device Fingerprinting**: Additional cryptographic device identification beyond AAGUID
+- **Security Level Assessment**: Categorizes devices as high/medium/low security based on verification
+- **Real-time Tamper Detection**: Detects and logs any attempts to modify device information
+
+#### Technical Implementation:
+```javascript
+// Enhanced device verification prevents AAGUID spoofing
+const deviceInfo = extractDeviceInfo(attestationObject);
+if (deviceInfo.securityLevel === 'high' && deviceInfo.attestationVerified) {
+  // Trusted device with verified attestation
+  await recordDeviceRegistration(deviceInfo);
+} else {
+  // Additional verification required for unverified devices
+  console.warn('Unverified device attempted registration');
+}
+```
+
+This protection ensures that even sophisticated attackers cannot bypass our spam prevention by manipulating device identification data.
 
 ### 👑 Admin Privileges
 

@@ -73,7 +73,6 @@ export const AuthProvider = ({ children }) => {
     setIsLoading(false); // Set loading to false since we have all the data we need
     
     console.log('AuthContext state updated. Token set:', !!authToken, 'User set:', !!userData);
-    toast.success(`Welcome back, ${userData.displayName || userData.username}!`);
     
     // Reset skip flag after a short delay
     setTimeout(() => {
@@ -94,7 +93,6 @@ export const AuthProvider = ({ children }) => {
       setUser(null);
       localStorage.removeItem('yublog_token');
       delete axios.defaults.headers.common['Authorization'];
-      toast.success('Logged out successfully');
     }
   };
 
