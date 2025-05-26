@@ -150,9 +150,12 @@ npm start
 ```
 
 **Access the application:**
-- Frontend: https://localhost (or http://localhost:3000 in dev mode)
-- API Documentation: https://localhost/api/health
-- Database: localhost:5432 (in dev mode)
+- **Frontend**: https://localhost (nginx reverse proxy)
+- **API**: https://localhost/api/health (nginx reverse proxy)
+- **Direct Development Access**: 
+  - Frontend: http://localhost:3000 (simple setup only)
+  - Backend: http://localhost:5000 (simple setup only)
+- **Database**: localhost:5432 (development access)
 
 ### Development Commands
 
@@ -173,13 +176,13 @@ make clean     # Clean up Docker resources
 To reset the database and apply the new security features:
 
 ```bash
-# Reset database with new security schema
-./scripts/reset-database.sh
+# Reset database with new security schema (Docker)
+./scripts/reset-database-docker.sh
 
 # Or manually with Docker
 docker-compose down -v
 docker-compose up -d db redis
-./scripts/reset-database.sh
+./scripts/reset-database-docker.sh
 ```
 
 ## 🔧 Configuration
