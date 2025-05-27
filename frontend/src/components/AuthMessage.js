@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   AlertTriangle, 
   CheckCircle, 
   XCircle, 
   Info, 
-  Clock, 
   Shield,
   Calendar,
   Timer,
@@ -23,7 +22,13 @@ const AuthMessage = ({
 }) => {
   const [isVisible, setIsVisible] = useState(true);
   const [timeRemaining, setTimeRemaining] = useState(null);
-  const [showSkipButton, setShowSkipButton] = useState(false);
+
+  const handleDismiss = useCallback(() => {
+    setIsVisible(false);
+    setTimeout(() => {
+      onDismiss?.();
+    }, 300);
+  }, [onDismiss]);
 
   // Handle auto-hide
   useEffect(() => {
@@ -33,17 +38,9 @@ const AuthMessage = ({
       }, duration);
       return () => clearTimeout(timer);
     }
-  }, [autoHide, duration]);
+  }, [autoHide, duration, handleDismiss]);
 
-  // Handle skip button visibility for success messages
-  useEffect(() => {
-    if (type === 'success' && details.showSkipButton && details.skipDelay) {
-      const timer = setTimeout(() => {
-        setShowSkipButton(true);
-      }, details.skipDelay);
-      return () => clearTimeout(timer);
-    }
-  }, [type, details.showSkipButton, details.skipDelay]);
+
 
   // Handle countdown for device blocking
   useEffect(() => {
@@ -71,13 +68,6 @@ const AuthMessage = ({
       return () => clearInterval(interval);
     }
   }, [details.blocked_until]);
-
-  const handleDismiss = () => {
-    setIsVisible(false);
-    setTimeout(() => {
-      onDismiss?.();
-    }, 300);
-  };
 
   const getMessageConfig = () => {
     switch (type) {
