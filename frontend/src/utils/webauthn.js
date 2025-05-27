@@ -314,9 +314,19 @@ export async function registerAdditionalDevice(deviceName) {
       throw new WebAuthnError('not_supported', 'WebAuthn is not supported on this device/browser');
     }
 
+    // Get authentication token from localStorage
+    const token = localStorage.getItem('yublog_token');
+    if (!token) {
+      throw new WebAuthnError('authentication_required', 'You must be logged in to add additional devices');
+    }
+
     // Step 1: Begin additional device registration
     console.log('Starting additional WebAuthn device registration');
-    const { data: options } = await api.post('/user/devices/webauthn/begin', { deviceName });
+    const { data: options } = await api.post('/user/devices/webauthn/begin', { deviceName }, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
 
     console.log('Additional device registration options received:', options);
 
@@ -365,7 +375,11 @@ export async function registerAdditionalDevice(deviceName) {
     console.log('Additional device credential prepared for transport:', credentialForTransport);
 
     // Step 6: Complete additional device registration
-    const { data: result } = await api.post('/user/devices/webauthn/complete', credentialForTransport);
+    const { data: result } = await api.post('/user/devices/webauthn/complete', credentialForTransport, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
 
     console.log('Additional device registration completed:', result);
     return result;
