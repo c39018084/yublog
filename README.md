@@ -85,7 +85,7 @@ The easiest way to get started with development:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/yublog.git
+git clone https://github.com/c39018084/yublog.git
 cd yublog
 
 # Run automated setup (creates .env, SSL certs, directories)
@@ -104,7 +104,7 @@ The default setup uses Express.js with native WebAuthn implementation:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/yublog.git
+git clone https://github.com/c39018084/yublog.git
 cd yublog
 
 # Set up development environment

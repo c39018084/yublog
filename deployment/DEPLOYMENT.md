@@ -26,7 +26,7 @@ This guide provides step-by-step instructions for deploying YuBlog, a passwordle
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/yublog.git
+git clone https://github.com/c39018084/yublog.git
 cd yublog
 ```
 

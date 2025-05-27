@@ -236,7 +236,7 @@ const HomePage = () => {
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Link>
               <a
-                href="https://github.com/yourusername/yublog"
+                href="https://github.com/c39018084/yublog"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center px-8 py-4 border border-primary-400 text-lg font-medium rounded-lg text-white hover:bg-primary-500 transition-colors"

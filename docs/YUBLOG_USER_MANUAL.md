@@ -1,7 +1,7 @@
 # YuBlog User Manual
 
 **Version 1.0**  
-**Date: December 2024**
+**Date: May 2025**
 
 ---
 
@@ -427,4 +427,4 @@ Welcome to the passwordless future with YuBlog!
 
 ---
 
-*This manual was last updated in December 2024. Features and procedures may change as YuBlog evolves.* 
+*This manual was last updated in May 2025. Features and procedures may change as YuBlog evolves.* 
