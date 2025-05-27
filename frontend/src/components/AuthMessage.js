@@ -263,17 +263,7 @@ const AuthMessage = ({
                 </div>
               )}
               
-              {/* Skip button for success messages */}
-              {type === 'success' && showSkipButton && details.actions && details.actions.length > 0 && (
-                <div className="mt-3 text-center">
-                  <button
-                    onClick={details.actions[0].action}
-                    className={`text-xs ${config.textColor} hover:${config.titleColor} transition-colors underline decoration-dotted`}
-                  >
-                    Skip to Sign In →
-                  </button>
-                </div>
-              )}
+
               
               {/* Device blocking specific content */}
               {type === 'device_blocked' && (

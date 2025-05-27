@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Shield, Trash2, Calendar, Smartphone, AlertCircle, BookOpen, Edit3, Eye, MoreHorizontal } from 'lucide-react';
+import { Shield, Trash2, Calendar, Smartphone, AlertCircle, BookOpen, Edit3, Eye, MoreHorizontal, Plus } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'react-hot-toast';
+import { registerAdditionalDevice } from '../utils/webauthn';
 
 const ProfilePage = () => {
   const { user } = useAuth();
@@ -16,6 +17,9 @@ const ProfilePage = () => {
   const [loading, setLoading] = useState(false);
   const [deletingDevice, setDeletingDevice] = useState(null);
   const [deletingPost, setDeletingPost] = useState(null);
+  const [addingDevice, setAddingDevice] = useState(false);
+  const [showAddDeviceModal, setShowAddDeviceModal] = useState(false);
+  const [newDeviceName, setNewDeviceName] = useState('');
 
   useEffect(() => {
     if (activeTab === 'devices') {
@@ -112,6 +116,42 @@ const ProfilePage = () => {
   const truncateContent = (content, maxLength = 150) => {
     if (content.length <= maxLength) return content;
     return content.substring(0, maxLength) + '...';
+  };
+
+  const handleAddDevice = async () => {
+    if (!newDeviceName.trim()) {
+      toast.error('Please enter a device name');
+      return;
+    }
+
+    try {
+      setAddingDevice(true);
+      const result = await registerAdditionalDevice(newDeviceName.trim());
+      
+      if (result.verified) {
+        toast.success('Device added successfully!');
+        setNewDeviceName('');
+        setShowAddDeviceModal(false);
+        // Refresh devices list
+        await fetchDevices();
+      }
+    } catch (error) {
+      console.error('Add device error:', error);
+      
+      if (error.type === 'device_blocked') {
+        toast.error(`Device temporarily blocked: ${error.message}`);
+      } else if (error.type === 'not_supported') {
+        toast.error('WebAuthn is not supported on this device/browser');
+      } else if (error.type === 'not_allowed') {
+        toast.error('Device registration was cancelled or not allowed');
+      } else if (error.type === 'invalid_state') {
+        toast.error('This security key is already registered');
+      } else {
+        toast.error(error.message || 'Failed to add device');
+      }
+    } finally {
+      setAddingDevice(false);
+    }
   };
 
   return (
@@ -219,9 +259,19 @@ const ProfilePage = () => {
                   <h2 className="text-xl font-semibold text-gray-900">
                     Security Devices
                   </h2>
-                  <div className="flex items-center text-sm text-gray-500">
-                    <Shield className="h-4 w-4 mr-1" />
-                    WebAuthn Devices
+                  <div className="flex items-center space-x-4">
+                    <button
+                      onClick={() => setShowAddDeviceModal(true)}
+                      disabled={addingDevice}
+                      className="btn-primary flex items-center space-x-2"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>Add Device</span>
+                    </button>
+                    <div className="flex items-center text-sm text-gray-500">
+                      <Shield className="h-4 w-4 mr-1" />
+                      WebAuthn Devices
+                    </div>
                   </div>
                 </div>
 
@@ -239,9 +289,16 @@ const ProfilePage = () => {
                     <h3 className="text-lg font-medium text-gray-900 mb-2">
                       No devices registered
                     </h3>
-                    <p className="text-gray-600">
-                      Your security devices will appear here after registration.
+                    <p className="text-gray-600 mb-4">
+                      Add a security device to enhance your account security.
                     </p>
+                    <button
+                      onClick={() => setShowAddDeviceModal(true)}
+                      className="btn-primary flex items-center space-x-2 mx-auto"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>Add Your First Device</span>
+                    </button>
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -408,6 +465,78 @@ const ProfilePage = () => {
             </motion.div>
           )}
         </motion.div>
+
+        {/* Add Device Modal */}
+        {showAddDeviceModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-lg p-6 max-w-md w-full mx-4"
+            >
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Add Security Device
+              </h3>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Device Name
+                  </label>
+                  <input
+                    type="text"
+                    value={newDeviceName}
+                    onChange={(e) => setNewDeviceName(e.target.value)}
+                    placeholder="e.g., YubiKey 5 Series, Touch ID, etc."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={addingDevice}
+                  />
+                </div>
+                
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-start">
+                    <Shield className="h-5 w-5 text-blue-600 mt-0.5 mr-3 flex-shrink-0" />
+                    <div className="text-sm text-blue-800">
+                      <p className="font-medium mb-1">Security Information</p>
+                      <p>
+                        You'll be prompted to touch your security key or use your device's biometric authentication. 
+                        The same 34-day restriction applies to prevent account spamming.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex space-x-3 mt-6">
+                <button
+                  onClick={handleAddDevice}
+                  disabled={addingDevice || !newDeviceName.trim()}
+                  className="flex-1 btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {addingDevice ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Adding Device...
+                    </>
+                  ) : (
+                    'Add Device'
+                  )}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowAddDeviceModal(false);
+                    setNewDeviceName('');
+                  }}
+                  disabled={addingDevice}
+                  className="flex-1 btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </div>
     </div>
   );

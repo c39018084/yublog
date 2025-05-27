@@ -10,6 +10,18 @@ const api = axios.create({
   },
 });
 
+// Custom error class for WebAuthn operations
+class WebAuthnError extends Error {
+  constructor(type, message, details = {}) {
+    super(message);
+    this.name = 'WebAuthnError';
+    this.type = type;
+    this.blocked_until = details.blocked_until;
+    this.days_remaining = details.days_remaining;
+    this.reason = details.reason;
+  }
+}
+
 // Helper functions for WebAuthn
 function base64URLToArrayBuffer(base64URL) {
   // Add padding if needed
@@ -289,4 +301,97 @@ export const getDeviceType = () => {
   if (/Linux/i.test(userAgent)) return 'Linux Device';
   
   return 'Unknown Device';
-}; 
+};
+
+/**
+ * Register an additional WebAuthn device for an existing authenticated user
+ */
+export async function registerAdditionalDevice(deviceName) {
+  try {
+    console.log('Additional WebAuthn device registration starting for:', deviceName);
+
+    if (!isWebAuthnSupported()) {
+      throw new WebAuthnError('not_supported', 'WebAuthn is not supported on this device/browser');
+    }
+
+    // Step 1: Begin additional device registration
+    console.log('Starting additional WebAuthn device registration');
+    const { data: options } = await api.post('/user/devices/webauthn/begin', { deviceName });
+
+    console.log('Additional device registration options received:', options);
+
+    // Step 2: Convert challenge and user ID from base64url
+    const challenge = base64URLToArrayBuffer(options.challenge);
+    const userId = base64URLToArrayBuffer(options.user.id);
+
+    // Step 3: Prepare credential creation options
+    const publicKeyCredentialCreationOptions = {
+      ...options,
+      challenge,
+      user: {
+        ...options.user,
+        id: userId,
+      },
+      excludeCredentials: options.excludeCredentials?.map(cred => ({
+        ...cred,
+        id: base64URLToArrayBuffer(cred.id),
+      })) || [],
+    };
+
+    console.log('Creating additional device credential with options:', publicKeyCredentialCreationOptions);
+
+    // Step 4: Create credential using WebAuthn API
+    const credential = await navigator.credentials.create({
+      publicKey: publicKeyCredentialCreationOptions,
+    });
+
+    console.log('Additional device credential created:', credential);
+
+    if (!credential) {
+      throw new WebAuthnError('not_allowed', 'User cancelled the device registration process');
+    }
+
+    // Step 5: Prepare credential for transport
+    const credentialForTransport = {
+      id: credential.id,
+      rawId: credential.id,
+      response: {
+        clientDataJSON: arrayBufferToBase64URL(credential.response.clientDataJSON),
+        attestationObject: arrayBufferToBase64URL(credential.response.attestationObject),
+      },
+      type: credential.type,
+    };
+
+    console.log('Additional device credential prepared for transport:', credentialForTransport);
+
+    // Step 6: Complete additional device registration
+    const { data: result } = await api.post('/user/devices/webauthn/complete', credentialForTransport);
+
+    console.log('Additional device registration completed:', result);
+    return result;
+  } catch (error) {
+    console.error('Additional WebAuthn device registration error:', error);
+    
+    if (error.name === 'NotSupportedError') {
+      throw new WebAuthnError('not_supported', 'WebAuthn is not supported on this device');
+    } else if (error.name === 'SecurityError') {
+      throw new WebAuthnError('security_error', 'Security error occurred during device registration');
+    } else if (error.name === 'NotAllowedError') {
+      throw new WebAuthnError('not_allowed', 'Device registration was cancelled or not allowed');
+    } else if (error.name === 'InvalidStateError') {
+      throw new WebAuthnError('invalid_state', 'This security key is already registered');
+    } else if (error.response?.status === 429) {
+      // Handle device blocking
+      const errorData = error.response.data;
+      throw new WebAuthnError('device_blocked', errorData.message, {
+        blocked_until: errorData.blocked_until,
+        days_remaining: errorData.days_remaining,
+        reason: errorData.reason
+      });
+    } else if (error.response?.data?.error) {
+      throw new WebAuthnError('registration_failed', error.response.data.error);
+    } else {
+      throw new WebAuthnError('registration_failed', error.message || 'Device registration failed');
+    }
+  }
+} 

@@ -9,11 +9,16 @@ import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
 import { db, redis } from './database.js';
 import { Pool } from 'pg';
+import { decode as cborDecode } from 'cbor-x';
 import {
   beginRegistration,
   completeRegistration,
   beginAuthentication,
-  completeAuthentication
+  completeAuthentication,
+  generateRegistrationOptions,
+  verifyRegistrationResponse,
+  extractDeviceInfo,
+  base64URLDecode
 } from './webauthn.js';
 
 // Load environment variables
@@ -524,6 +529,228 @@ app.delete('/api/user/devices/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Delete device error:', error);
     res.status(500).json({ error: 'Failed to remove device' });
+  }
+});
+
+// Add additional device endpoints
+app.post('/api/user/devices/webauthn/begin', authenticateToken, strictLimiter, async (req, res) => {
+  try {
+    const { deviceName } = req.body;
+    
+    if (!deviceName || deviceName.trim().length === 0) {
+      return res.status(400).json({ error: 'Device name is required' });
+    }
+    
+    const user = await db.getUserById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Get existing credentials to exclude them
+    const existingCredentials = await db.getUserCredentials(req.user.id);
+    
+    const { options, challenge } = await generateRegistrationOptions({
+      id: user.id,
+      username: user.username,
+      displayName: user.display_name || user.username
+    });
+    
+    // Exclude existing credentials so the same device can't be registered twice
+    options.excludeCredentials = existingCredentials.map(cred => ({
+      type: 'public-key',
+      id: cred.credential_id,
+      transports: ['usb', 'ble', 'nfc', 'internal']
+    }));
+    
+    // Store challenge and device name temporarily
+    const challengeKey = `add_device_challenge_${challenge}`;
+    await redis.setex(challengeKey, 300, JSON.stringify({ 
+      challenge, 
+      userId: req.user.id,
+      deviceName: deviceName.trim(),
+      timestamp: Date.now() 
+    }));
+    
+    console.log('Add device registration options generated for user:', user.username);
+    console.log('Challenge stored:', challengeKey);
+    
+    res.json(options);
+  } catch (error) {
+    console.error('Add device begin error:', error);
+    res.status(500).json({ error: 'Failed to initiate device registration' });
+  }
+});
+
+app.post('/api/user/devices/webauthn/complete', authenticateToken, strictLimiter, async (req, res) => {
+  try {
+    const credential = req.body;
+    
+    if (!credential || !credential.response) {
+      return res.status(400).json({ error: 'Invalid credential data' });
+    }
+    
+    // Find the challenge by looking for stored add device challenges
+    const keys = await redis.keys('add_device_challenge_*');
+    let challengeData = null;
+    let challengeKey = null;
+    
+    for (const key of keys) {
+      const data = await redis.get(key);
+      if (data) {
+        const parsed = JSON.parse(data);
+        // Find challenge for current user
+        if (parsed.userId === req.user.id) {
+          challengeData = parsed;
+          challengeKey = key;
+          break;
+        }
+      }
+    }
+    
+    if (!challengeData) {
+      return res.status(400).json({ error: 'No valid registration challenge found' });
+    }
+    
+    const { challenge, deviceName } = challengeData;
+    const user = await db.getUserById(req.user.id);
+    
+    // Verify the registration
+    const verification = await verifyRegistrationResponse(credential, challenge, user);
+    
+    if (!verification.verified) {
+      await redis.del(challengeKey);
+      return res.status(400).json({ error: verification.error || 'Registration verification failed' });
+    }
+
+    console.log('=== ADDING ADDITIONAL DEVICE ===');
+    
+    let deviceInfo = { aaguid: null, attestationCertHash: null, deviceFingerprint: null };
+    
+    try {
+      // Extract device information for spam prevention
+      const attestationObjectBuffer = base64URLDecode(credential.response.attestationObject);
+      const attestationObject = cborDecode(attestationObjectBuffer);
+      deviceInfo = extractDeviceInfo(attestationObject);
+      
+      console.log('Device info for additional device:', deviceInfo);
+    } catch (error) {
+      console.error('Error extracting device info for additional device:', error);
+    }
+    
+    // Check if device can register (34-day cooldown) - same restriction applies to additional devices
+    if (deviceInfo.aaguid) {
+      console.log('=== CHECKING ADDITIONAL DEVICE ELIGIBILITY ===');
+      
+      const eligibility = await db.checkDeviceRegistrationEligibility(
+        deviceInfo.aaguid, 
+        deviceInfo.attestationCertHash
+      );
+      
+      console.log('Additional device eligibility result:', eligibility);
+      
+      if (!eligibility.can_register) {
+        // Record failed attempt
+        await db.recordDeviceRegistration(
+          deviceInfo.aaguid,
+          deviceInfo.attestationCertHash,
+          deviceInfo.deviceFingerprint,
+          false
+        );
+        
+        // Log audit event
+        await db.logAuditEvent({
+          userId: req.user.id,
+          action: 'additional_device_registration_blocked',
+          resourceType: 'device',
+          details: {
+            aaguid: deviceInfo.aaguid,
+            blocked_until: eligibility.blocked_until,
+            days_remaining: eligibility.days_remaining,
+            reason: 'account_spam_prevention'
+          },
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent'),
+          success: false
+        });
+        
+        await redis.del(challengeKey);
+        
+        const blockedDate = new Date(eligibility.blocked_until).toLocaleDateString();
+        return res.status(429).json({ 
+          error: 'Device registration temporarily blocked',
+          message: `This device has recently been used to create an account. For security reasons to prevent account spamming, you can add this device on ${blockedDate} (${eligibility.days_remaining} days remaining).`,
+          blocked_until: eligibility.blocked_until,
+          days_remaining: eligibility.days_remaining,
+          reason: 'account_spam_prevention'
+        });
+      }
+    }
+    
+    // Record successful device registration
+    let deviceRegistrationId = null;
+    if (deviceInfo.aaguid) {
+      deviceRegistrationId = await db.recordDeviceRegistration(
+        deviceInfo.aaguid,
+        deviceInfo.attestationCertHash,
+        deviceInfo.deviceFingerprint,
+        true
+      );
+    }
+    
+    // Store credential in database
+    const credentialData = {
+      userId: req.user.id,
+      credentialId: verification.registrationInfo.credentialId,
+      publicKey: verification.registrationInfo.publicKeyPEM,
+      counter: verification.registrationInfo.signCount,
+      deviceName: deviceName,
+      aaguid: deviceInfo.aaguid,
+      attestationCertHash: deviceInfo.attestationCertHash,
+      deviceRegistrationId: deviceRegistrationId
+    };
+    
+    console.log('=== SAVING ADDITIONAL CREDENTIAL TO DATABASE ===');
+    console.log('Additional credential data to save:', credentialData);
+    
+    const credentialRecord = await db.createCredential(credentialData);
+    
+    console.log('Saved additional credential record:', credentialRecord);
+    console.log('=== ADDITIONAL CREDENTIAL SAVED ===');
+    
+    // Log successful device addition
+    await db.logAuditEvent({
+      userId: req.user.id,
+      action: 'additional_device_added',
+      resourceType: 'credential',
+      resourceId: credentialRecord.id,
+      details: {
+        deviceName: deviceName,
+        aaguid: deviceInfo.aaguid,
+        device_registration_id: deviceRegistrationId
+      },
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent'),
+      success: true
+    });
+    
+    // Clean up challenge
+    await redis.del(challengeKey);
+    
+    console.log('Additional device registration completed successfully for user:', user.username);
+    
+    res.json({
+      verified: true,
+      device: {
+        id: credentialRecord.id,
+        name: deviceName,
+        createdAt: credentialRecord.created_at,
+        lastUsed: null,
+        counter: credentialRecord.counter
+      }
+    });
+  } catch (error) {
+    console.error('Add device complete error:', error);
+    res.status(500).json({ error: 'Failed to complete device registration' });
   }
 });
 
