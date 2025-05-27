@@ -40,7 +40,7 @@ function base64URLEncode(buffer) {
     .replace(/=/g, '');
 }
 
-function base64URLDecode(str) {
+export function base64URLDecode(str) {
   // Add padding if needed
   const padding = 4 - (str.length % 4);
   if (padding !== 4) {
@@ -187,7 +187,7 @@ function coseKeyToPem(coseKey) {
   throw new Error('Unsupported key type or curve');
 }
 
-function extractDeviceInfo(attestationObject) {
+export function extractDeviceInfo(attestationObject) {
   try {
     console.log('=== EXTRACTING DEVICE INFO ===');
     const authData = parseAuthenticatorData(attestationObject.authData);
