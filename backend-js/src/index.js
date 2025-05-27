@@ -660,7 +660,7 @@ app.post('/api/user/devices/webauthn/complete', authenticateToken, strictLimiter
         // Log audit event
         await db.logAuditEvent({
           userId: req.user.id,
-          action: 'additional_device_registration_blocked',
+          action: 'device_registration_blocked',
           resourceType: 'device',
           details: {
             aaguid: deviceInfo.aaguid,
@@ -720,7 +720,7 @@ app.post('/api/user/devices/webauthn/complete', authenticateToken, strictLimiter
     // Log successful device addition
     await db.logAuditEvent({
       userId: req.user.id,
-      action: 'additional_device_added',
+      action: 'register_device',
       resourceType: 'credential',
       resourceId: credentialRecord.id,
       details: {
