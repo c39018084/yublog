@@ -34,7 +34,7 @@ const PostPage = () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await axios.get(`/api/posts/${id}`);
+      const response = await axios.get(`/posts/${id}`);
       setPost(response.data);
     } catch (error) {
       console.error('Failed to fetch post:', error);

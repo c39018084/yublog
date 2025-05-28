@@ -54,7 +54,7 @@ const CreatePostPage = () => {
         tags: formData.tags ? formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : []
       };
 
-      const response = await axios.post('/api/posts', postData);
+      const response = await axios.post('/posts', postData);
       
       showMessage('success', 'Post Published Successfully!', `"${formData.title}" has been published and is now live on your blog.`, {
         icon: '🚀',
@@ -115,7 +115,7 @@ const CreatePostPage = () => {
         isDraft: true
       };
 
-      const response = await axios.post('/api/posts', postData);
+      const response = await axios.post('/posts', postData);
       
       showMessage('success', 'Draft Saved Successfully!', `"${formData.title}" has been saved as a draft for later editing.`, {
         icon: '💾',

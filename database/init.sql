@@ -29,8 +29,9 @@ CREATE TABLE device_registrations (
     device_fingerprint TEXT, -- Additional device identification data
     first_registration_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     last_registration_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_registered_user_id UUID REFERENCES users(id) ON DELETE SET NULL, -- Track which user last registered this device
     registration_count INTEGER DEFAULT 1,
-    blocked_until TIMESTAMP WITH TIME ZONE, -- When device can register again
+    account_creation_blocked_until TIMESTAMP WITH TIME ZONE, -- When device can create NEW accounts again (34-day restriction)
     
     -- Indexes for performance
     UNIQUE(aaguid, attestation_cert_hash)
@@ -170,7 +171,7 @@ CREATE INDEX idx_users_active ON users(is_active);
 CREATE INDEX idx_users_admin ON users(is_admin);
 
 CREATE INDEX idx_device_registrations_aaguid ON device_registrations(aaguid);
-CREATE INDEX idx_device_registrations_blocked ON device_registrations(blocked_until) WHERE blocked_until IS NOT NULL;
+CREATE INDEX idx_device_registrations_blocked ON device_registrations(account_creation_blocked_until) WHERE account_creation_blocked_until IS NOT NULL;
 CREATE INDEX idx_device_registrations_cleanup ON device_registrations(last_registration_at);
 
 CREATE INDEX idx_credentials_user ON credentials(user_id);
@@ -266,12 +267,12 @@ BEGIN
         RETURN;
     END IF;
     
-    -- Check if device is currently blocked
-    IF device_record.blocked_until IS NOT NULL AND device_record.blocked_until > NOW() THEN
+    -- Check if device is currently blocked for account creation
+    IF device_record.account_creation_blocked_until IS NOT NULL AND device_record.account_creation_blocked_until > NOW() THEN
         RETURN QUERY SELECT 
             FALSE,
-            device_record.blocked_until,
-            EXTRACT(DAYS FROM (device_record.blocked_until - NOW()))::INTEGER;
+            device_record.account_creation_blocked_until,
+            EXTRACT(DAYS FROM (device_record.account_creation_blocked_until - NOW()))::INTEGER;
         RETURN;
     END IF;
     
@@ -285,6 +286,66 @@ BEGIN
     END IF;
     
     -- Device can register
+    RETURN QUERY SELECT TRUE, NULL::TIMESTAMP WITH TIME ZONE, 0;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to check if device can be added to an existing user account
+CREATE OR REPLACE FUNCTION can_device_add_to_account(
+    p_aaguid TEXT,
+    p_attestation_cert_hash TEXT DEFAULT NULL,
+    p_user_id UUID DEFAULT NULL
+)
+RETURNS TABLE (
+    can_register BOOLEAN,
+    blocked_until TIMESTAMP WITH TIME ZONE,
+    days_remaining INTEGER
+) AS $$
+DECLARE
+    device_record RECORD;
+    cooldown_period INTERVAL := '34 days';
+    current_user_id UUID;
+BEGIN
+    -- Get current user ID from session or parameter
+    current_user_id := COALESCE(p_user_id, current_setting('app.current_user_id', true)::UUID);
+    
+    -- Look for existing device registration
+    SELECT * INTO device_record
+    FROM device_registrations dr
+    WHERE dr.aaguid = p_aaguid 
+    AND (p_attestation_cert_hash IS NULL OR dr.attestation_cert_hash = p_attestation_cert_hash);
+    
+    -- If no previous registration, allow (first time use)
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT TRUE, NULL::TIMESTAMP WITH TIME ZONE, 0;
+        RETURN;
+    END IF;
+    
+    -- If device was last registered by the same user, allow re-adding (no restriction)
+    IF device_record.last_registered_user_id = current_user_id THEN
+        RETURN QUERY SELECT TRUE, NULL::TIMESTAMP WITH TIME ZONE, 0;
+        RETURN;
+    END IF;
+    
+    -- If device was used by a different user, apply 34-day restriction
+    IF device_record.account_creation_blocked_until IS NOT NULL AND device_record.account_creation_blocked_until > NOW() THEN
+        RETURN QUERY SELECT 
+            FALSE,
+            device_record.account_creation_blocked_until,
+            EXTRACT(DAYS FROM (device_record.account_creation_blocked_until - NOW()))::INTEGER;
+        RETURN;
+    END IF;
+    
+    -- Check if enough time has passed since last registration by different user
+    IF device_record.last_registration_at + cooldown_period > NOW() AND device_record.last_registered_user_id IS NOT NULL AND device_record.last_registered_user_id != current_user_id THEN
+        RETURN QUERY SELECT 
+            FALSE,
+            device_record.last_registration_at + cooldown_period,
+            EXTRACT(DAYS FROM ((device_record.last_registration_at + cooldown_period) - NOW()))::INTEGER;
+        RETURN;
+    END IF;
+    
+    -- Device can be added to account
     RETURN QUERY SELECT TRUE, NULL::TIMESTAMP WITH TIME ZONE, 0;
 END;
 $$ LANGUAGE plpgsql;
@@ -308,8 +369,9 @@ BEGIN
         device_fingerprint,
         first_registration_at,
         last_registration_at,
+        last_registered_user_id,
         registration_count,
-        blocked_until
+        account_creation_blocked_until
     )
     VALUES (
         p_aaguid,
@@ -317,6 +379,7 @@ BEGIN
         p_device_fingerprint,
         NOW(),
         NOW(),
+        CASE WHEN p_success THEN current_setting('app.current_user_id')::UUID ELSE NULL END,
         1,
         CASE WHEN p_success THEN NOW() + cooldown_period ELSE NULL END
     )
@@ -324,8 +387,9 @@ BEGIN
     DO UPDATE SET
         last_registration_at = NOW(),
         registration_count = device_registrations.registration_count + 1,
-        blocked_until = CASE WHEN p_success THEN NOW() + cooldown_period ELSE device_registrations.blocked_until END,
-        device_fingerprint = COALESCE(p_device_fingerprint, device_registrations.device_fingerprint)
+        account_creation_blocked_until = CASE WHEN p_success THEN NOW() + cooldown_period ELSE device_registrations.account_creation_blocked_until END,
+        device_fingerprint = COALESCE(p_device_fingerprint, device_registrations.device_fingerprint),
+        last_registered_user_id = CASE WHEN p_success THEN current_setting('app.current_user_id')::UUID ELSE device_registrations.last_registered_user_id END
     RETURNING id INTO device_reg_id;
     
     RETURN device_reg_id;

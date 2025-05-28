@@ -171,12 +171,38 @@ export const db = {
     return result.rows[0];
   },
 
-  async recordDeviceRegistration(aaguid, attestationCertHash = null, deviceFingerprint = null, success = true) {
+  async checkDeviceAddToAccountEligibility(aaguid, attestationCertHash = null, userId = null) {
     const query = `
-      SELECT record_device_registration($1, $2, $3, $4) as device_registration_id
+      SELECT can_register, blocked_until, days_remaining
+      FROM can_device_add_to_account($1, $2, $3)
     `;
-    const result = await pool.query(query, [aaguid, attestationCertHash, deviceFingerprint, success]);
-    return result.rows[0].device_registration_id;
+    const result = await pool.query(query, [aaguid, attestationCertHash, userId]);
+    return result.rows[0];
+  },
+
+  async recordDeviceRegistration(aaguid, attestationCertHash = null, deviceFingerprint = null, success = true, userId = null) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      // Set user context if userId is provided
+      if (userId && success) {
+        await client.query('SELECT set_config($1, $2, true)', ['app.current_user_id', userId]);
+      }
+      
+      const query = `
+        SELECT record_device_registration($1, $2, $3, $4) as device_registration_id
+      `;
+      const result = await client.query(query, [aaguid, attestationCertHash, deviceFingerprint, success]);
+      
+      await client.query('COMMIT');
+      return result.rows[0].device_registration_id;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 
   async getDeviceRegistrationStats(aaguid) {
@@ -445,6 +471,10 @@ export const db = {
       WHERE id = $1
     `;
     await pool.query(query, [sessionId, newTokenHash]);
+  },
+
+  async setUserContext(userId) {
+    await pool.query('SELECT set_config($1, $2, true)', ['app.current_user_id', userId]);
   }
 };
 

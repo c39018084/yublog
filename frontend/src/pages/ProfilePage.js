@@ -31,7 +31,7 @@ const ProfilePage = () => {
     message: '',
     itemName: '',
     itemType: '',
-    confirmText: 'Delete',
+    confirmText: '',
     onConfirm: null
   });
 
@@ -64,7 +64,7 @@ const ProfilePage = () => {
   const fetchDevices = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('/api/user/devices');
+      const response = await axios.get('/user/devices');
       setDevices(response.data);
     } catch (error) {
       console.error('Failed to fetch devices:', error);
@@ -79,7 +79,7 @@ const ProfilePage = () => {
   const fetchUserPosts = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('/api/user/posts');
+      const response = await axios.get('/user/posts');
       setPosts(response.data);
     } catch (error) {
       console.error('Failed to fetch posts:', error);
@@ -119,7 +119,7 @@ const ProfilePage = () => {
         return;
       }
       
-      await axios.delete(`/api/user/devices/${deviceId}`, {
+      await axios.delete(`/user/devices/${deviceId}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -172,11 +172,12 @@ const ProfilePage = () => {
   };
 
   const confirmDeletePost = async (postId, postTitle) => {
+    console.log('*** CLOSING MODAL from confirmDeletePost ***');
     setConfirmationModal(prev => ({ ...prev, isOpen: false }));
     
     try {
       setDeletingPost(postId);
-      await axios.delete(`/api/posts/${postId}`);
+      await axios.delete(`/posts/${postId}`);
       setPosts(posts.filter(post => post.id !== postId));
       showMessage('success', 'Post Deleted Successfully', `"${postTitle}" has been permanently deleted.`, {
         icon: '🗑️',
@@ -682,18 +683,19 @@ const ProfilePage = () => {
           />
         </div>
       )}
-      {confirmationModal.isOpen && (
-        <ConfirmationModal
-          type={confirmationModal.type}
-          title={confirmationModal.title}
-          message={confirmationModal.message}
-          itemName={confirmationModal.itemName}
-          itemType={confirmationModal.itemType}
-          confirmText={confirmationModal.confirmText}
-          onConfirm={confirmationModal.onConfirm}
-          onCancel={() => setConfirmationModal({ ...confirmationModal, isOpen: false })}
-        />
-      )}
+
+      {/* Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={confirmationModal.isOpen}
+        onClose={() => setConfirmationModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmationModal.onConfirm}
+        type={confirmationModal.type}
+        title={confirmationModal.title}
+        message={confirmationModal.message}
+        itemName={confirmationModal.itemName}
+        itemType={confirmationModal.itemType}
+        confirmText={confirmationModal.confirmText}
+      />
     </div>
   );
 };

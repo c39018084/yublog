@@ -1,6 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 
+// Configure axios base URL globally
+const API_BASE_URL = process.env.REACT_APP_API_URL || '';
+if (API_BASE_URL) {
+  axios.defaults.baseURL = API_BASE_URL;
+}
+
 const AuthContext = createContext();
 
 export const useAuth = () => {
@@ -46,7 +52,7 @@ export const AuthProvider = ({ children }) => {
   const fetchUserProfile = async () => {
     try {
       console.log('Fetching user profile...');
-      const response = await axios.get('/api/user/profile');
+      const response = await axios.get('/user/profile');
       console.log('Profile fetch successful:', response.data);
       setUser(response.data);
     } catch (error) {
@@ -83,7 +89,7 @@ export const AuthProvider = ({ children }) => {
     try {
       // Call logout endpoint if token exists
       if (token) {
-        await axios.post('/api/auth/logout');
+        await axios.post('/auth/logout');
       }
     } catch (error) {
       console.error('Logout error:', error);

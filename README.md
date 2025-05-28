@@ -6,8 +6,11 @@ A self-hosted, highly secure blogging platform with passwordless authentication 
 
 - **Passwordless Authentication**: No passwords stored or used anywhere
 - **YubiKey Support**: Full FIDO2/WebAuthn hardware security key integration
+- **Multi-Device Support**: Add/remove multiple security devices per account
+- **Device Management**: View device usage, creation dates, and manage security keys
 - **Account Spam Prevention**: 34-day cooldown between device registrations to prevent account spamming
 - **Device Registration Tracking**: AAGUID-based device identification and registration limits
+- **Smart Device Policies**: Different rules for account creation vs. adding devices to existing accounts
 - **Admin Privileges**: First registered user automatically receives administrator privileges
 - **End-to-End Encryption**: TLS 1.3 with modern cipher suites
 - **Rate Limiting**: Protection against brute force attacks
@@ -235,6 +238,49 @@ For production deployment:
 4. Regular security updates
 5. Backup strategy implementation
 
+## 🔑 Device Management
+
+YuBlog supports comprehensive security device management for enhanced security and convenience:
+
+### Multiple Device Support
+- **Add Multiple Devices**: Register multiple YubiKeys, Touch ID, Windows Hello, etc.
+- **Device Names**: Assign custom names to identify your devices easily
+- **Usage Tracking**: See when each device was last used for authentication
+- **Device History**: Track device creation dates and usage patterns
+
+### Device Registration Rules
+- **Account Creation**: First device registers user account (34-day cooldown)
+- **Additional Devices**: Different rules for adding devices to existing accounts
+- **Smart Policies**: Prevents account spam while allowing legitimate multi-device usage
+- **Immediate Availability**: Add/remove devices from existing accounts without cooldown
+
+### Device Security Features
+- **Device Identification**: Uses AAGUID and attestation certificates for unique identification
+- **Tampering Protection**: Cryptographic verification prevents device information spoofing
+- **Trusted Devices**: Enhanced security for verified hardware manufacturers
+- **Security Levels**: Devices categorized as high/medium/low security based on verification
+
+### Managing Your Devices
+1. **View Devices**: Go to Profile → Security Devices
+2. **Add Device**: Click "Add New Device" and follow WebAuthn prompts
+3. **Remove Device**: Click the delete button next to any device (confirmation required)
+4. **Device Info**: See device names, creation dates, and last usage
+
+### Device Management APIs
+For developers integrating with YuBlog:
+
+```bash
+# List user devices
+GET /api/user/devices
+
+# Add new device
+POST /api/user/devices/webauthn/begin
+POST /api/user/devices/webauthn/complete
+
+# Remove device
+DELETE /api/user/devices/:deviceId
+```
+
 ## 🛠️ Development Status
 
 ### ✅ **Currently Implemented:**
@@ -244,9 +290,13 @@ For production deployment:
 - Flask backend alternative with security best practices
 - Blog creation, editing, and management
 - User profile management
+- **Multi-device support with add/remove functionality**
+- **Device management UI with confirmation modals**
 - **Device registration spam prevention (34-day cooldown)**
+- **Smart device policies (different rules for account creation vs. adding devices)**
 - **Automatic admin privileges for first user**
 - **AAGUID-based device tracking and identification**
+- **Device deletion and re-addition without cooldown for existing accounts**
 - Comprehensive security headers
 - Rate limiting and audit logging
 - Docker containerization

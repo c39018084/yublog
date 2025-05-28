@@ -637,13 +637,14 @@ app.post('/api/user/devices/webauthn/complete', authenticateToken, strictLimiter
       console.error('Error extracting device info for additional device:', error);
     }
     
-    // Check if device can register (34-day cooldown) - same restriction applies to additional devices
+    // Check if device can be added to account (different logic for existing users)
     if (deviceInfo.aaguid) {
       console.log('=== CHECKING ADDITIONAL DEVICE ELIGIBILITY ===');
       
-      const eligibility = await db.checkDeviceRegistrationEligibility(
+      const eligibility = await db.checkDeviceAddToAccountEligibility(
         deviceInfo.aaguid, 
-        deviceInfo.attestationCertHash
+        deviceInfo.attestationCertHash,
+        req.user.id
       );
       
       console.log('Additional device eligibility result:', eligibility);
@@ -654,7 +655,8 @@ app.post('/api/user/devices/webauthn/complete', authenticateToken, strictLimiter
           deviceInfo.aaguid,
           deviceInfo.attestationCertHash,
           deviceInfo.deviceFingerprint,
-          false
+          false,
+          req.user.id
         );
         
         // Log audit event
@@ -666,7 +668,7 @@ app.post('/api/user/devices/webauthn/complete', authenticateToken, strictLimiter
             aaguid: deviceInfo.aaguid,
             blocked_until: eligibility.blocked_until,
             days_remaining: eligibility.days_remaining,
-            reason: 'account_spam_prevention'
+            reason: 'device_used_by_other_account'
           },
           ipAddress: req.ip,
           userAgent: req.get('User-Agent'),
@@ -678,10 +680,10 @@ app.post('/api/user/devices/webauthn/complete', authenticateToken, strictLimiter
         const blockedDate = new Date(eligibility.blocked_until).toLocaleDateString();
         return res.status(429).json({ 
           error: 'Device registration temporarily blocked',
-          message: `This device has recently been used to create an account. For security reasons to prevent account spamming, you can add this device on ${blockedDate} (${eligibility.days_remaining} days remaining).`,
+          message: `This device has recently been used by another account. For security reasons to prevent account spamming, you can add this device on ${blockedDate} (${eligibility.days_remaining} days remaining).`,
           blocked_until: eligibility.blocked_until,
           days_remaining: eligibility.days_remaining,
-          reason: 'account_spam_prevention'
+          reason: 'device_used_by_other_account'
         });
       }
     }
@@ -693,7 +695,8 @@ app.post('/api/user/devices/webauthn/complete', authenticateToken, strictLimiter
         deviceInfo.aaguid,
         deviceInfo.attestationCertHash,
         deviceInfo.deviceFingerprint,
-        true
+        true,
+        req.user.id
       );
     }
     

@@ -670,7 +670,8 @@ export async function completeRegistration(req, res) {
           deviceInfo.aaguid,
           deviceInfo.attestationCertHash,
           deviceInfo.deviceFingerprint,
-          false
+          false,
+          null  // No user ID for failed registration attempts
         );
         
         // Log audit event
@@ -709,14 +710,15 @@ export async function completeRegistration(req, res) {
       displayName: user.displayName
     });
     
-    // Record successful device registration
+    // Record successful device registration (now that user exists)
     let deviceRegistrationId = null;
     if (deviceInfo.aaguid) {
       deviceRegistrationId = await db.recordDeviceRegistration(
         deviceInfo.aaguid,
         deviceInfo.attestationCertHash,
         deviceInfo.deviceFingerprint,
-        true
+        true,
+        newUser.id  // Pass user ID directly
       );
     }
     

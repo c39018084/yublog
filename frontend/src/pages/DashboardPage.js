@@ -35,20 +35,30 @@ const DashboardPage = () => {
 
   const fetchDashboardData = async () => {
     try {
+      setLoading(true);
+      
       // Fetch user's devices and posts stats in parallel
       const [devicesResponse, statsResponse] = await Promise.all([
-        axios.get('/api/user/devices'),
-        axios.get('/api/user/posts/stats')
+        axios.get('/user/devices'),
+        axios.get('/user/posts/stats')
       ]);
       
       const devices = devicesResponse.data;
       const postStats = statsResponse.data;
       
       setStats({
-        totalPosts: postStats.totalPosts,
-        publishedPosts: postStats.publishedPosts,
-        draftPosts: postStats.draftPosts,
+        ...postStats,
         deviceCount: devices.length
+      });
+      
+      showMessage('success', 'Dashboard Updated', 'Your latest activity and device status have been refreshed.', {
+        icon: '📊',
+        features: [
+          'Security devices verified',
+          'Post statistics updated',
+          'Account activity tracked'
+        ],
+        autoHide: true
       });
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);

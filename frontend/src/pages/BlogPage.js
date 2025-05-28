@@ -30,7 +30,7 @@ const BlogPage = () => {
   const fetchPosts = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('/api/posts');
+      const response = await axios.get('/posts');
       setPosts(response.data);
       setError(null);
     } catch (error) {
