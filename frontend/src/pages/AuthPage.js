@@ -4,7 +4,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { registerWebAuthn, authenticateWebAuthn, isWebAuthnSupported } from '../utils/webauthn';
 import LoadingSpinner from '../components/LoadingSpinner';
 import AuthMessage from '../components/AuthMessage';
-import toast from 'react-hot-toast';
 import { Shield, Key, Smartphone, AlertTriangle, CheckCircle } from 'lucide-react';
 
 const AuthPage = () => {
