@@ -22,46 +22,38 @@ class WebAuthnError extends Error {
   }
 }
 
-// Helper functions for WebAuthn
-function base64URLToArrayBuffer(base64URL) {
-  // Add padding if needed
-  const padding = 4 - (base64URL.length % 4);
-  if (padding !== 4) {
-    base64URL += '='.repeat(padding);
-  }
-  // Replace URL-safe characters
-  const base64 = base64URL.replace(/-/g, '+').replace(/_/g, '/');
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
-}
-
-function arrayBufferToBase64URL(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary)
+// Helper function to convert Buffer to Base64URL
+const bufferToBase64URL = (buffer) => {
+  return btoa(String.fromCharCode(...new Uint8Array(buffer)))
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=/g, '');
-}
+};
+
+// Helper function to convert Base64URL to Buffer
+const base64URLToBuffer = (base64URL) => {
+  const base64 = base64URL.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
+  const binary = atob(padded);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return buffer;
+};
 
 function convertPublicKeyCredentialCreationOptions(options) {
   return {
     ...options,
-    challenge: base64URLToArrayBuffer(options.challenge),
+    challenge: base64URLToBuffer(options.challenge),
     user: {
       ...options.user,
-      id: base64URLToArrayBuffer(options.user.id),
+      id: base64URLToBuffer(options.user.id),
     },
     excludeCredentials: options.excludeCredentials?.map(cred => ({
       ...cred,
-      id: base64URLToArrayBuffer(cred.id),
+      id: base64URLToBuffer(cred.id),
     })) || [],
   };
 }
@@ -69,10 +61,10 @@ function convertPublicKeyCredentialCreationOptions(options) {
 function convertPublicKeyCredentialRequestOptions(options) {
   return {
     ...options,
-    challenge: base64URLToArrayBuffer(options.challenge),
+    challenge: base64URLToBuffer(options.challenge),
     allowCredentials: options.allowCredentials?.map(cred => ({
       ...cred,
-      id: base64URLToArrayBuffer(cred.id),
+      id: base64URLToBuffer(cred.id),
     })) || [],
   };
 }
@@ -80,10 +72,10 @@ function convertPublicKeyCredentialRequestOptions(options) {
 function convertCredentialForTransport(credential) {
   return {
     id: credential.id,
-    rawId: arrayBufferToBase64URL(credential.rawId),
+    rawId: bufferToBase64URL(credential.rawId),
     response: {
-      clientDataJSON: arrayBufferToBase64URL(credential.response.clientDataJSON),
-      attestationObject: arrayBufferToBase64URL(credential.response.attestationObject),
+      clientDataJSON: bufferToBase64URL(credential.response.clientDataJSON),
+      attestationObject: bufferToBase64URL(credential.response.attestationObject),
     },
     type: credential.type,
   };
@@ -92,12 +84,12 @@ function convertCredentialForTransport(credential) {
 function convertAssertionForTransport(assertion) {
   return {
     id: assertion.id,
-    rawId: arrayBufferToBase64URL(assertion.rawId),
+    rawId: bufferToBase64URL(assertion.rawId),
     response: {
-      authenticatorData: arrayBufferToBase64URL(assertion.response.authenticatorData),
-      clientDataJSON: arrayBufferToBase64URL(assertion.response.clientDataJSON),
-      signature: arrayBufferToBase64URL(assertion.response.signature),
-      userHandle: assertion.response.userHandle ? arrayBufferToBase64URL(assertion.response.userHandle) : null,
+      authenticatorData: bufferToBase64URL(assertion.response.authenticatorData),
+      clientDataJSON: bufferToBase64URL(assertion.response.clientDataJSON),
+      signature: bufferToBase64URL(assertion.response.signature),
+      userHandle: assertion.response.userHandle ? bufferToBase64URL(assertion.response.userHandle) : null,
     },
     type: assertion.type,
   };
@@ -121,8 +113,8 @@ export async function registerWebAuthn(userData) {
     console.log('Registration options received:', options);
 
     // Step 2: Convert challenge and user ID from base64url
-    const challenge = base64URLToArrayBuffer(options.challenge);
-    const userId = base64URLToArrayBuffer(options.user.id);
+    const challenge = base64URLToBuffer(options.challenge);
+    const userId = base64URLToBuffer(options.user.id);
 
     // Step 3: Prepare credential creation options
     const publicKeyCredentialCreationOptions = {
@@ -152,8 +144,8 @@ export async function registerWebAuthn(userData) {
       id: credential.id,
       rawId: credential.id,
       response: {
-        clientDataJSON: arrayBufferToBase64URL(credential.response.clientDataJSON),
-        attestationObject: arrayBufferToBase64URL(credential.response.attestationObject),
+        clientDataJSON: bufferToBase64URL(credential.response.clientDataJSON),
+        attestationObject: bufferToBase64URL(credential.response.attestationObject),
       },
       type: credential.type,
     };
@@ -331,8 +323,8 @@ export async function registerAdditionalDevice(deviceName) {
     console.log('Additional device registration options received:', options);
 
     // Step 2: Convert challenge and user ID from base64url
-    const challenge = base64URLToArrayBuffer(options.challenge);
-    const userId = base64URLToArrayBuffer(options.user.id);
+    const challenge = base64URLToBuffer(options.challenge);
+    const userId = base64URLToBuffer(options.user.id);
 
     // Step 3: Prepare credential creation options
     const publicKeyCredentialCreationOptions = {
@@ -344,7 +336,7 @@ export async function registerAdditionalDevice(deviceName) {
       },
       excludeCredentials: options.excludeCredentials?.map(cred => ({
         ...cred,
-        id: base64URLToArrayBuffer(cred.id),
+        id: base64URLToBuffer(cred.id),
       })) || [],
     };
 
@@ -366,8 +358,8 @@ export async function registerAdditionalDevice(deviceName) {
       id: credential.id,
       rawId: credential.id,
       response: {
-        clientDataJSON: arrayBufferToBase64URL(credential.response.clientDataJSON),
-        attestationObject: arrayBufferToBase64URL(credential.response.attestationObject),
+        clientDataJSON: bufferToBase64URL(credential.response.clientDataJSON),
+        attestationObject: bufferToBase64URL(credential.response.attestationObject),
       },
       type: credential.type,
     };

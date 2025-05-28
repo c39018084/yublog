@@ -132,6 +132,16 @@ export const db = {
     return result.rows[0];
   },
 
+  async getCredentialByDatabaseId(id) {
+    const query = `
+      SELECT c.*, u.* FROM credentials c
+      JOIN users u ON c.user_id = u.id
+      WHERE c.id = $1
+    `;
+    const result = await pool.query(query, [id]);
+    return result.rows[0];
+  },
+
   async findCredentialsByUserId(userId) {
     const query = 'SELECT * FROM credentials WHERE user_id = $1';
     const result = await pool.query(query, [userId]);
@@ -204,7 +214,7 @@ export const db = {
   async invalidateSession(tokenHash) {
     const query = `
       UPDATE sessions 
-      SET is_active = false, updated_at = NOW()
+      SET is_active = false, last_activity = NOW()
       WHERE token_hash = $1
     `;
     await pool.query(query, [tokenHash]);

@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Calendar, User, Tag, BookOpen } from 'lucide-react';
 import axios from 'axios';
-import { toast } from 'react-hot-toast';
+import AuthMessage from '../components/AuthMessage';
 
 const PostPage = () => {
   const { id } = useParams();
@@ -11,6 +11,18 @@ const PostPage = () => {
   const [post, setPost] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [message, setMessage] = useState(null);
+
+  const showMessage = (type, title, messageText, details = {}) => {
+    setMessage({
+      type,
+      title,
+      message: messageText,
+      details,
+      autoHide: false,
+      duration: 0
+    });
+  };
 
   useEffect(() => {
     if (id) {
@@ -30,7 +42,9 @@ const PostPage = () => {
         setError('Post not found');
       } else {
         setError('Failed to load post');
-        toast.error('Failed to load post');
+        showMessage('error', 'Failed to Load Post', 'Unable to retrieve the requested blog post. Please check the URL and try again.', {
+          additionalInfo: 'This could be due to a network issue, server problem, or the post may have been removed.'
+        });
       }
     } finally {
       setLoading(false);
@@ -195,6 +209,21 @@ const PostPage = () => {
             </footer>
           </article>
         </motion.div>
+        
+        {/* AuthMessage */}
+        {message && (
+          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-full mx-4">
+            <AuthMessage
+              type={message.type}
+              title={message.title}
+              message={message.message}
+              details={message.details}
+              autoHide={message.autoHide}
+              duration={message.duration}
+              onDismiss={() => setMessage(null)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

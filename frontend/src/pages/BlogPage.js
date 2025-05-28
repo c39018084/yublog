@@ -3,13 +3,25 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, Calendar, User, Tag } from 'lucide-react';
 import axios from 'axios';
-import { toast } from 'react-hot-toast';
+import AuthMessage from '../components/AuthMessage';
 
 const BlogPage = () => {
   const navigate = useNavigate();
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [message, setMessage] = useState(null);
+
+  const showMessage = (type, title, messageText, details = {}) => {
+    setMessage({
+      type,
+      title,
+      message: messageText,
+      details,
+      autoHide: false,
+      duration: 0
+    });
+  };
 
   useEffect(() => {
     fetchPosts();
@@ -24,7 +36,9 @@ const BlogPage = () => {
     } catch (error) {
       console.error('Failed to fetch posts:', error);
       setError('Failed to load blog posts');
-      toast.error('Failed to load blog posts');
+      showMessage('error', 'Failed to Load Blog Posts', 'Unable to retrieve the latest blog posts. Please refresh the page and try again.', {
+        additionalInfo: 'This could be due to a network issue or server problem. Check your connection and try again.'
+      });
     } finally {
       setLoading(false);
     }
@@ -173,6 +187,21 @@ const BlogPage = () => {
                 </div>
               </motion.article>
             ))}
+          </div>
+        )}
+        
+        {/* AuthMessage */}
+        {message && (
+          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-full mx-4">
+            <AuthMessage
+              type={message.type}
+              title={message.title}
+              message={message.message}
+              details={message.details}
+              autoHide={message.autoHide}
+              duration={message.duration}
+              onDismiss={() => setMessage(null)}
+            />
           </div>
         )}
       </div>

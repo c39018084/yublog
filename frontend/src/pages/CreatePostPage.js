@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Save, ArrowLeft, Tag } from 'lucide-react';
 import axios from 'axios';
-import { toast } from 'react-hot-toast';
+import AuthMessage from '../components/AuthMessage';
 
 const CreatePostPage = () => {
   const navigate = useNavigate();
@@ -15,6 +15,18 @@ const CreatePostPage = () => {
     tags: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  const showMessage = (type, title, messageText, details = {}) => {
+    setMessage({
+      type,
+      title,
+      message: messageText,
+      details,
+      autoHide: type === 'success',
+      duration: type === 'success' ? 4000 : 0
+    });
+  };
 
   const handleChange = (e) => {
     setFormData({
@@ -27,7 +39,9 @@ const CreatePostPage = () => {
     e.preventDefault();
     
     if (!formData.title.trim() || !formData.content.trim()) {
-      toast.error('Title and content are required');
+      showMessage('error', 'Missing Required Fields', 'Please provide both a title and content for your post.', {
+        additionalInfo: 'Both title and content are required to create a meaningful blog post.'
+      });
       return;
     }
 
@@ -42,14 +56,39 @@ const CreatePostPage = () => {
 
       const response = await axios.post('/api/posts', postData);
       
-      toast.success('Post created successfully!');
-      navigate('/dashboard');
+      showMessage('success', 'Post Published Successfully!', `"${formData.title}" has been published and is now live on your blog.`, {
+        icon: '🚀',
+        features: [
+          'Post is now publicly visible',
+          'Added to your blog index',
+          'Ready for readers to discover'
+        ],
+        nextSteps: [
+          'Share your post with others',
+          'Monitor engagement and feedback',
+          'Start working on your next post'
+        ],
+        additionalInfo: 'Your post has been successfully published and added to the public blog. You can view it or make edits from your dashboard.',
+        actions: [{
+          label: 'View Post',
+          action: () => navigate(`/blog/${response.data.id}`)
+        }]
+      });
+      
+      // Navigate to dashboard after showing success message briefly
+      setTimeout(() => {
+        navigate('/dashboard');
+      }, 2000);
     } catch (error) {
       console.error('Failed to create post:', error);
       if (error.response?.data?.error) {
-        toast.error(error.response.data.error);
+        showMessage('error', 'Failed to Publish Post', error.response.data.error, {
+          additionalInfo: 'Please check your input and try again. If the problem persists, contact support.'
+        });
       } else {
-        toast.error('Failed to create post. Please try again.');
+        showMessage('error', 'Publication Error', 'An error occurred while publishing your post. Please try again.', {
+          additionalInfo: 'This could be due to a network issue or server problem. Check your connection and try again.'
+        });
       }
     } finally {
       setIsSubmitting(false);
@@ -60,7 +99,9 @@ const CreatePostPage = () => {
     e.preventDefault();
     
     if (!formData.title.trim() || !formData.content.trim()) {
-      toast.error('Title and content are required');
+      showMessage('error', 'Missing Required Fields', 'Please provide both a title and content before saving as draft.', {
+        additionalInfo: 'Even drafts need a title and content to be saved properly.'
+      });
       return;
     }
 
@@ -76,14 +117,39 @@ const CreatePostPage = () => {
 
       const response = await axios.post('/api/posts', postData);
       
-      toast.success('Draft saved successfully!');
-      navigate('/dashboard');
+      showMessage('success', 'Draft Saved Successfully!', `"${formData.title}" has been saved as a draft for later editing.`, {
+        icon: '💾',
+        features: [
+          'Draft securely saved',
+          'Available in your dashboard',
+          'Can be edited and published anytime'
+        ],
+        nextSteps: [
+          'Continue editing when ready',
+          'Publish when you\'re satisfied',
+          'Review and refine your content'
+        ],
+        additionalInfo: 'Your draft has been saved and can be accessed from your dashboard. You can continue editing and publish it when ready.',
+        actions: [{
+          label: 'Continue Editing',
+          action: () => navigate(`/edit/${response.data.id}`)
+        }]
+      });
+      
+      // Navigate to dashboard after showing success message briefly
+      setTimeout(() => {
+        navigate('/dashboard');
+      }, 2000);
     } catch (error) {
       console.error('Failed to save draft:', error);
       if (error.response?.data?.error) {
-        toast.error(error.response.data.error);
+        showMessage('error', 'Failed to Save Draft', error.response.data.error, {
+          additionalInfo: 'Please check your input and try again. If the problem persists, contact support.'
+        });
       } else {
-        toast.error('Failed to save draft. Please try again.');
+        showMessage('error', 'Save Error', 'An error occurred while saving your draft. Please try again.', {
+          additionalInfo: 'This could be due to a network issue or server problem. Check your connection and try again.'
+        });
       }
     } finally {
       setIsSubmitting(false);
@@ -226,6 +292,21 @@ const CreatePostPage = () => {
             </div>
           </form>
         </motion.div>
+        
+        {/* AuthMessage */}
+        {message && (
+          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-full mx-4">
+            <AuthMessage
+              type={message.type}
+              title={message.title}
+              message={message.message}
+              details={message.details}
+              autoHide={message.autoHide}
+              duration={message.duration}
+              onDismiss={() => setMessage(null)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

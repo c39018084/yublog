@@ -515,7 +515,7 @@ app.get('/api/user/devices', authenticateToken, async (req, res) => {
 app.delete('/api/user/devices/:id', authenticateToken, async (req, res) => {
   try {
     const deviceId = req.params.id;
-    const device = await db.getCredentialById(deviceId);
+    const device = await db.getCredentialByDatabaseId(deviceId);
     
     if (!device || device.user_id !== req.user.id) {
       return res.status(404).json({ error: 'Device not found' });

@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Shield, Trash2, Calendar, Smartphone, AlertCircle, BookOpen, Edit3, Eye, MoreHorizontal, Plus } from 'lucide-react';
+import { Shield, Trash2, Calendar, Smartphone, AlertCircle, BookOpen, Edit3, Eye, Plus } from 'lucide-react';
 import axios from 'axios';
-import { toast } from 'react-hot-toast';
 import { registerAdditionalDevice } from '../utils/webauthn';
+import AuthMessage from '../components/AuthMessage';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 const ProfilePage = () => {
   const { user } = useAuth();
@@ -20,6 +21,19 @@ const ProfilePage = () => {
   const [addingDevice, setAddingDevice] = useState(false);
   const [showAddDeviceModal, setShowAddDeviceModal] = useState(false);
   const [newDeviceName, setNewDeviceName] = useState('');
+  
+  // Message and confirmation state
+  const [message, setMessage] = useState(null);
+  const [confirmationModal, setConfirmationModal] = useState({
+    isOpen: false,
+    type: 'danger',
+    title: '',
+    message: '',
+    itemName: '',
+    itemType: '',
+    confirmText: 'Delete',
+    onConfirm: null
+  });
 
   useEffect(() => {
     if (activeTab === 'devices') {
@@ -36,6 +50,17 @@ const ProfilePage = () => {
     }
   }, [searchParams]);
 
+  const showMessage = (type, title, messageText, details = {}) => {
+    setMessage({
+      type,
+      title,
+      message: messageText,
+      details,
+      autoHide: type === 'success',
+      duration: type === 'success' ? 4000 : 0
+    });
+  };
+
   const fetchDevices = async () => {
     try {
       setLoading(true);
@@ -43,7 +68,9 @@ const ProfilePage = () => {
       setDevices(response.data);
     } catch (error) {
       console.error('Failed to fetch devices:', error);
-      toast.error('Failed to load devices');
+      showMessage('error', 'Failed to Load Devices', 'Unable to retrieve your security devices. Please refresh the page and try again.', {
+        additionalInfo: 'This could be due to a network issue or server problem. Check your connection and try again.'
+      });
     } finally {
       setLoading(false);
     }
@@ -56,43 +83,115 @@ const ProfilePage = () => {
       setPosts(response.data);
     } catch (error) {
       console.error('Failed to fetch posts:', error);
-      toast.error('Failed to load posts');
+      showMessage('error', 'Failed to Load Posts', 'Unable to retrieve your blog posts. Please refresh the page and try again.', {
+        additionalInfo: 'This could be due to a network issue or server problem. Check your connection and try again.'
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const handleDeleteDevice = async (deviceId, deviceName) => {
-    if (!window.confirm(`Are you sure you want to remove "${deviceName}"? This action cannot be undone.`)) {
-      return;
-    }
+    setConfirmationModal({
+      isOpen: true,
+      type: 'danger',
+      title: 'Remove Security Device',
+      message: 'This will permanently remove the security device from your account. You will no longer be able to use it to sign in.',
+      itemName: deviceName,
+      itemType: 'Security Device',
+      confirmText: 'Remove Device',
+      onConfirm: () => confirmDeleteDevice(deviceId, deviceName)
+    });
+  };
 
+  const confirmDeleteDevice = async (deviceId, deviceName) => {
+    setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+    
     try {
       setDeletingDevice(deviceId);
-      await axios.delete(`/api/user/devices/${deviceId}`);
+      
+      // Get the token from localStorage to ensure it's included
+      const token = localStorage.getItem('yublog_token');
+      if (!token) {
+        showMessage('error', 'Authentication Required', 'Please log in again to continue.', {
+          additionalInfo: 'Your session may have expired. Try refreshing the page and signing in again.'
+        });
+        return;
+      }
+      
+      await axios.delete(`/api/user/devices/${deviceId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
       setDevices(devices.filter(device => device.id !== deviceId));
-      toast.success('Device removed successfully');
+      showMessage('success', 'Device Removed Successfully', `"${deviceName}" has been removed from your account.`, {
+        icon: '✅',
+        features: [
+          'Device access revoked immediately',
+          'Security audit log updated', 
+          'Account remains secure with remaining devices'
+        ],
+        additionalInfo: 'Make sure you have at least one security device registered to maintain access to your account.'
+      });
     } catch (error) {
       console.error('Failed to delete device:', error);
-      toast.error('Failed to remove device');
+      
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        showMessage('error', 'Authentication Failed', 'Your session has expired. Please log in again.', {
+          additionalInfo: 'Try refreshing the page and signing in again to continue managing your devices.'
+        });
+      } else if (error.response?.status === 404) {
+        showMessage('warning', 'Device Not Found', 'This device may have already been removed from your account.', {
+          additionalInfo: 'The device list will be refreshed to show the current state.'
+        });
+        // Refresh the devices list
+        fetchDevices();
+      } else {
+        showMessage('error', 'Failed to Remove Device', 'An error occurred while removing the security device. Please try again.', {
+          additionalInfo: 'If the problem persists, try refreshing the page or contact support.'
+        });
+      }
     } finally {
       setDeletingDevice(null);
     }
   };
 
   const handleDeletePost = async (postId, postTitle) => {
-    if (!window.confirm(`Are you sure you want to delete "${postTitle}"? This action cannot be undone.`)) {
-      return;
-    }
+    setConfirmationModal({
+      isOpen: true,
+      type: 'danger',
+      title: 'Delete Blog Post',
+      message: 'This will permanently delete your blog post and remove it from public view. All comments and analytics data will also be lost.',
+      itemName: postTitle,
+      itemType: 'Blog Post',
+      confirmText: 'Delete Post',
+      onConfirm: () => confirmDeletePost(postId, postTitle)
+    });
+  };
 
+  const confirmDeletePost = async (postId, postTitle) => {
+    setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+    
     try {
       setDeletingPost(postId);
       await axios.delete(`/api/posts/${postId}`);
       setPosts(posts.filter(post => post.id !== postId));
-      toast.success('Post deleted successfully');
+      showMessage('success', 'Post Deleted Successfully', `"${postTitle}" has been permanently deleted.`, {
+        icon: '🗑️',
+        features: [
+          'Post removed from public view',
+          'All associated data cleared',
+          'Blog index updated automatically'
+        ],
+        additionalInfo: 'This action cannot be undone. The post and all its content have been permanently removed.'
+      });
     } catch (error) {
       console.error('Failed to delete post:', error);
-      toast.error('Failed to delete post');
+      showMessage('error', 'Failed to Delete Post', 'An error occurred while deleting your blog post. Please try again.', {
+        additionalInfo: 'If the problem persists, try refreshing the page or contact support.'
+      });
     } finally {
       setDeletingPost(null);
     }
@@ -101,6 +200,8 @@ const ProfilePage = () => {
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     setSearchParams({ tab });
+    // Clear any existing messages when switching tabs
+    setMessage(null);
   };
 
   const formatDate = (dateString) => {
@@ -120,7 +221,9 @@ const ProfilePage = () => {
 
   const handleAddDevice = async () => {
     if (!newDeviceName.trim()) {
-      toast.error('Please enter a device name');
+      showMessage('error', 'Device Name Required', 'Please enter a name for your security device.', {
+        additionalInfo: 'This helps you identify the device in your security settings.'
+      });
       return;
     }
 
@@ -129,7 +232,20 @@ const ProfilePage = () => {
       const result = await registerAdditionalDevice(newDeviceName.trim());
       
       if (result.verified) {
-        toast.success('Device added successfully!');
+        showMessage('success', 'Device Added Successfully!', `"${newDeviceName}" has been registered with your account.`, {
+          icon: '🔐',
+          features: [
+            'New security device registered',
+            'WebAuthn authentication enabled',
+            'Device ready for secure sign-in'
+          ],
+          nextSteps: [
+            'You can now use this device to sign in',
+            'Keep your security device safe',
+            'Consider adding a backup device'
+          ],
+          additionalInfo: 'Your new security device has been added to your account and is ready to use for passwordless authentication.'
+        });
         setNewDeviceName('');
         setShowAddDeviceModal(false);
         // Refresh devices list
@@ -139,15 +255,28 @@ const ProfilePage = () => {
       console.error('Add device error:', error);
       
       if (error.type === 'device_blocked') {
-        toast.error(`Device temporarily blocked: ${error.message}`);
+        showMessage('device_blocked', 'Device Registration Blocked', error.message, {
+          blocked_until: error.blocked_until,
+          days_remaining: error.days_remaining,
+          reason: error.reason,
+          additionalInfo: 'This security measure prevents spam and maintains platform integrity. Each device has a 34-day cooldown period between account registrations.'
+        });
       } else if (error.type === 'not_supported') {
-        toast.error('WebAuthn is not supported on this device/browser');
+        showMessage('error', 'WebAuthn Not Supported', 'Your device or browser does not support WebAuthn authentication.', {
+          additionalInfo: 'Please use a modern browser like Chrome, Firefox, Safari, or Edge with WebAuthn support.'
+        });
       } else if (error.type === 'not_allowed') {
-        toast.error('Device registration was cancelled or not allowed');
+        showMessage('warning', 'Device Registration Cancelled', 'The security device registration was cancelled or not permitted.', {
+          additionalInfo: 'Make sure to follow the prompts on your security device and try again.'
+        });
       } else if (error.type === 'invalid_state') {
-        toast.error('This security key is already registered');
+        showMessage('warning', 'Device Already Registered', 'This security device is already registered with an account.', {
+          additionalInfo: 'If this is your device, try signing in instead. Each security device can only be registered once.'
+        });
       } else {
-        toast.error(error.message || 'Failed to add device');
+        showMessage('error', 'Failed to Add Device', error.message || 'An error occurred while registering your security device.', {
+          additionalInfo: 'Please check your device and connection, then try again.'
+        });
       }
     } finally {
       setAddingDevice(false);
@@ -538,6 +667,33 @@ const ProfilePage = () => {
           </div>
         )}
       </div>
+
+      {/* AuthMessage and ConfirmationModal */}
+      {message && (
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-full mx-4">
+          <AuthMessage
+            type={message.type}
+            title={message.title}
+            message={message.message}
+            details={message.details}
+            autoHide={message.autoHide}
+            duration={message.duration}
+            onDismiss={() => setMessage(null)}
+          />
+        </div>
+      )}
+      {confirmationModal.isOpen && (
+        <ConfirmationModal
+          type={confirmationModal.type}
+          title={confirmationModal.title}
+          message={confirmationModal.message}
+          itemName={confirmationModal.itemName}
+          itemType={confirmationModal.itemType}
+          confirmText={confirmationModal.confirmText}
+          onConfirm={confirmationModal.onConfirm}
+          onCancel={() => setConfirmationModal({ ...confirmationModal, isOpen: false })}
+        />
+      )}
     </div>
   );
 };

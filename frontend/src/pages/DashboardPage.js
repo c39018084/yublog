@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { BarChart3, Users, BookOpen, Shield } from 'lucide-react';
 import axios from 'axios';
-import { toast } from 'react-hot-toast';
+import AuthMessage from '../components/AuthMessage';
 
 const DashboardPage = () => {
   const { user } = useAuth();
@@ -16,6 +16,18 @@ const DashboardPage = () => {
     deviceCount: 0
   });
   const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState(null);
+
+  const showMessage = (type, title, messageText, details = {}) => {
+    setMessage({
+      type,
+      title,
+      message: messageText,
+      details,
+      autoHide: type === 'success' || type === 'info',
+      duration: type === 'success' || type === 'info' ? 4000 : 0
+    });
+  };
 
   useEffect(() => {
     fetchDashboardData();
@@ -40,7 +52,9 @@ const DashboardPage = () => {
       });
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
-      toast.error('Failed to load dashboard data');
+      showMessage('error', 'Failed to Load Dashboard Data', 'Unable to retrieve your dashboard information. Please refresh the page and try again.', {
+        additionalInfo: 'This could be due to a network issue or server problem. Check your connection and try again.'
+      });
     } finally {
       setLoading(false);
     }
@@ -55,7 +69,20 @@ const DashboardPage = () => {
   };
 
   const handleViewAnalytics = () => {
-    toast.info('Analytics feature coming soon!');
+    showMessage('info', 'Analytics Coming Soon!', 'Advanced analytics and insights for your blog are currently under development.', {
+      icon: '📊',
+      features: [
+        'Post performance metrics',
+        'Reader engagement statistics',
+        'Traffic and growth insights'
+      ],
+      nextSteps: [
+        'Keep creating great content',
+        'Check back for updates',
+        'Follow our development progress'
+      ],
+      additionalInfo: 'We\'re working hard to bring you comprehensive analytics to help you understand your audience and grow your blog.'
+    });
   };
 
   const handleMyPosts = () => {
@@ -179,6 +206,21 @@ const DashboardPage = () => {
             </div>
           </div>
         </motion.div>
+        
+        {/* AuthMessage */}
+        {message && (
+          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-full mx-4">
+            <AuthMessage
+              type={message.type}
+              title={message.title}
+              message={message.message}
+              details={message.details}
+              autoHide={message.autoHide}
+              duration={message.duration}
+              onDismiss={() => setMessage(null)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
