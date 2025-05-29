@@ -2,23 +2,46 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { registerWebAuthn, authenticateWebAuthn, isWebAuthnSupported } from '../utils/webauthn';
+import { loginWithTotp, checkTotpAvailable } from '../utils/totp';
 import LoadingSpinner from '../components/LoadingSpinner';
 import AuthMessage from '../components/AuthMessage';
 import { Shield, Key, Smartphone, AlertTriangle, CheckCircle } from 'lucide-react';
 
 const AuthPage = () => {
-  const [mode, setMode] = useState('login'); // 'login' or 'register'
+  const [mode, setMode] = useState('login'); // 'login', 'register', or 'totp'
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
-    username: ''
+    username: '',
+    totpCode: ''
   });
   const [webAuthnSupported, setWebAuthnSupported] = useState(false);
+  const [totpAvailable, setTotpAvailable] = useState(false);
+  const [isBackupCode, setIsBackupCode] = useState(false);
   const [message, setMessage] = useState(null);
   const { login } = useAuth();
 
   useEffect(() => {
     setWebAuthnSupported(isWebAuthnSupported());
   }, []);
+
+  // Check if TOTP is available for the entered username
+  useEffect(() => {
+    const checkTotp = async () => {
+      if (formData.username && mode === 'login') {
+        try {
+          const available = await checkTotpAvailable(formData.username);
+          setTotpAvailable(available);
+        } catch (error) {
+          setTotpAvailable(false);
+        }
+      } else {
+        setTotpAvailable(false);
+      }
+    };
+
+    const delayedCheck = setTimeout(checkTotp, 500); // Debounce
+    return () => clearTimeout(delayedCheck);
+  }, [formData.username, mode]);
 
   const handleInputChange = (e) => {
     setFormData({
@@ -245,10 +268,63 @@ const AuthPage = () => {
     }
   };
 
+  const handleTotpLogin = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setMessage(null);
+
+    try {
+      const result = await loginWithTotp({
+        username: formData.username,
+        code: formData.totpCode,
+        isBackupCode: isBackupCode
+      });
+
+      if (result.token) {
+        login(result.token, result.user);
+        
+        setMessage({
+          type: 'success',
+          title: 'Welcome Back!',
+          message: `Successfully authenticated with ${isBackupCode ? 'backup code' : 'authenticator app'}`,
+          autoHide: true,
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      console.error('TOTP login error:', error);
+      
+      setMessage({
+        type: 'error',
+        title: 'Authentication Failed',
+        message: error.message || 'Invalid code or username',
+        details: {
+          additionalInfo: isBackupCode 
+            ? 'Please check your backup code and try again. Each backup code can only be used once.'
+            : 'Please check your authenticator app and enter the current 6-digit code.'
+        }
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const switchToTotpMode = () => {
+    setMode('totp');
+    setFormData({ ...formData, totpCode: '' });
+    setMessage(null);
+  };
+
   const switchMode = () => {
-    setMode(mode === 'login' ? 'register' : 'login');
-    setFormData({ username: '' });
-    setMessage(null); // Clear any existing messages when switching modes
+    if (mode === 'totp') {
+      setMode('login');
+      setFormData({ username: formData.username, totpCode: '' });
+    } else {
+      setMode(mode === 'login' ? 'register' : 'login');
+      setFormData({ username: '', totpCode: '' });
+    }
+    setMessage(null);
+    setIsBackupCode(false);
   };
 
   return (
@@ -270,11 +346,13 @@ const AuthPage = () => {
             <Shield className="h-10 w-10 text-primary-600" />
           </motion.div>
           <h2 className="mt-6 text-3xl font-bold gradient-text">
-            {mode === 'login' ? 'Welcome back' : 'Create your account'}
+            {mode === 'login' ? 'Welcome back' : mode === 'totp' ? 'Enter your code' : 'Create your account'}
           </h2>
           <p className="mt-2 text-sm text-secondary-600">
             {mode === 'login' 
               ? 'Sign in securely with your security key' 
+              : mode === 'totp'
+              ? `Enter the ${isBackupCode ? 'backup code' : '6-digit code from your authenticator app'}`
               : 'Register with passwordless authentication'
             }
           </p>
@@ -327,7 +405,7 @@ const AuthPage = () => {
           transition={{ delay: 0.3 }}
           className="card"
         >
-          <form onSubmit={mode === 'login' ? handleLogin : handleRegister} className="space-y-6">
+          <form onSubmit={mode === 'login' ? handleLogin : mode === 'totp' ? handleTotpLogin : handleRegister} className="space-y-6">
             {/* Username Field */}
             <div>
               <label htmlFor="username" className="block text-sm font-medium text-secondary-700 mb-2">
@@ -342,37 +420,99 @@ const AuthPage = () => {
                 onChange={handleInputChange}
                 className="input-field"
                 placeholder="Enter your username"
-                disabled={isLoading}
+                disabled={isLoading || mode === 'totp'}
               />
             </div>
+
+            {/* TOTP Code Field (only in TOTP mode) */}
+            {mode === 'totp' && (
+              <div>
+                <label htmlFor="totpCode" className="block text-sm font-medium text-secondary-700 mb-2">
+                  {isBackupCode ? 'Backup Code' : 'Authenticator Code'}
+                </label>
+                <input
+                  id="totpCode"
+                  name="totpCode"
+                  type="text"
+                  required
+                  value={formData.totpCode}
+                  onChange={handleInputChange}
+                  className="input-field"
+                  placeholder={isBackupCode ? "Enter backup code" : "Enter 6-digit code"}
+                  disabled={isLoading}
+                  maxLength={isBackupCode ? 8 : 6}
+                />
+                <div className="mt-2 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setIsBackupCode(!isBackupCode)}
+                    className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                    disabled={isLoading}
+                  >
+                    {isBackupCode ? 'Use authenticator code' : 'Use backup code instead'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={isLoading || !webAuthnSupported}
+              disabled={isLoading || (mode === 'login' && !webAuthnSupported)}
               className={`w-full flex items-center justify-center py-3 text-base font-medium transition-all duration-200 ${
                 mode === 'login'
                   ? 'btn-primary' // Blue for login
+                  : mode === 'totp'
+                  ? 'bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white shadow-lg hover:shadow-xl disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed rounded-lg font-medium transition-all duration-200' // Purple for TOTP
                   : 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-lg hover:shadow-xl disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed rounded-lg font-medium transition-all duration-200' // Green for registration
               }`}
             >
               {isLoading ? (
                 <div className="flex items-center justify-center">
                   <LoadingSpinner size="small" className="mr-2" />
-                  {mode === 'login' ? 'Authenticating...' : 'Creating Account...'}
+                  {mode === 'login' ? 'Authenticating...' : mode === 'totp' ? 'Verifying...' : 'Creating Account...'}
                 </div>
               ) : (
                 <div className="flex items-center justify-center">
                   {mode === 'login' ? (
                     <Key className="h-5 w-5 mr-2" />
+                  ) : mode === 'totp' ? (
+                    <Smartphone className="h-5 w-5 mr-2" />
                   ) : (
                     <CheckCircle className="h-5 w-5 mr-2" />
                   )}
-                  {mode === 'login' ? 'Sign In with Security Key' : 'Create Account with Security Key'}
+                  {mode === 'login' 
+                    ? 'Sign In with Security Key' 
+                    : mode === 'totp' 
+                    ? `Verify ${isBackupCode ? 'Backup Code' : 'Authenticator Code'}` 
+                    : 'Create Account with Security Key'
+                  }
                 </div>
               )}
             </button>
           </form>
+
+          {/* Alternative Login Methods */}
+          {mode === 'login' && totpAvailable && (
+            <div className="mt-4">
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300" />
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-white text-gray-500">or</span>
+                </div>
+              </div>
+              <button
+                onClick={switchToTotpMode}
+                disabled={isLoading}
+                className="mt-4 w-full flex items-center justify-center py-2 px-4 border border-purple-300 rounded-lg text-sm font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 transition-colors duration-200"
+              >
+                <Smartphone className="h-4 w-4 mr-2" />
+                Sign in with Authenticator App
+              </button>
+            </div>
+          )}
 
           {/* Mode Switch */}
           <div className="mt-6 text-center">
@@ -383,6 +523,8 @@ const AuthPage = () => {
             >
               {mode === 'login' 
                 ? "Don't have an account? Register here" 
+                : mode === 'totp'
+                ? 'Back to security key login'
                 : 'Already have an account? Sign in'
               }
             </button>

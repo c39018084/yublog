@@ -430,6 +430,76 @@ export const db = {
     await pool.query(query, [credentialId]);
   },
 
+  // TOTP Authenticator Management
+  async createTotpAuthenticator(totpData) {
+    const { userId, secret, name, backupCodes } = totpData;
+    const query = `
+      INSERT INTO totp_authenticators (user_id, secret, name, backup_codes, created_at)
+      VALUES ($1, $2, $3, $4, NOW())
+      RETURNING *
+    `;
+    const values = [userId, secret, name || 'Authenticator App', backupCodes];
+    const result = await pool.query(query, values);
+    return result.rows[0];
+  },
+
+  async getTotpAuthenticator(userId) {
+    const query = `
+      SELECT * FROM totp_authenticators 
+      WHERE user_id = $1 AND is_active = true
+    `;
+    const result = await pool.query(query, [userId]);
+    return result.rows[0] || null;
+  },
+
+  async updateTotpLastUsed(userId) {
+    const query = `
+      UPDATE totp_authenticators 
+      SET last_used = NOW()
+      WHERE user_id = $1 AND is_active = true
+    `;
+    await pool.query(query, [userId]);
+  },
+
+  async disableTotpAuthenticator(userId) {
+    const query = `
+      UPDATE totp_authenticators 
+      SET is_active = false
+      WHERE user_id = $1
+    `;
+    await pool.query(query, [userId]);
+  },
+
+  async hasTotpAuthenticator(userId) {
+    const query = `
+      SELECT EXISTS(
+        SELECT 1 FROM totp_authenticators 
+        WHERE user_id = $1 AND is_active = true
+      ) as has_totp
+    `;
+    const result = await pool.query(query, [userId]);
+    return result.rows[0].has_totp;
+  },
+
+  async getTotpBackupCodes(userId) {
+    const query = `
+      SELECT backup_codes FROM totp_authenticators 
+      WHERE user_id = $1 AND is_active = true
+    `;
+    const result = await pool.query(query, [userId]);
+    return result.rows[0]?.backup_codes || [];
+  },
+
+  async useBackupCode(userId, codeIndex) {
+    // Remove the used backup code by setting it to null in the array
+    const query = `
+      UPDATE totp_authenticators 
+      SET backup_codes[$2] = NULL
+      WHERE user_id = $1 AND is_active = true
+    `;
+    await pool.query(query, [userId, codeIndex + 1]); // PostgreSQL arrays are 1-indexed
+  },
+
   // Audit logging
   async logAuditEvent(auditData) {
     const { userId, action, resourceType, resourceId, details, ipAddress, userAgent, success } = auditData;

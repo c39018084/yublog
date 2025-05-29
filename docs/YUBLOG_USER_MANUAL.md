@@ -14,10 +14,11 @@
 5. [Dashboard Overview](#dashboard-overview)
 6. [Creating and Managing Posts](#creating-and-managing-posts)
 7. [Security Device Management](#security-device-management)
-8. [Account Settings](#account-settings)
-9. [Security Features](#security-features)
-10. [Troubleshooting](#troubleshooting)
-11. [FAQ](#faq)
+8. [Authenticator App Setup](#authenticator-app-setup)
+9. [Account Settings](#account-settings)
+10. [Security Features](#security-features)
+11. [Troubleshooting](#troubleshooting)
+12. [FAQ](#faq)
 
 ---
 
@@ -90,19 +91,38 @@ Welcome to **YuBlog** - a secure, modern blogging platform that prioritizes your
 1. Go to the YuBlog website
 2. Click **"Sign In"**
 3. Enter your **username**
-4. Click **"Sign In with Security Key"**
-5. Use your security device when prompted
+4. Choose your sign-in method:
+   - **"Sign In with Security Key"** (primary method)
+   - **"Sign in with Authenticator App"** (if TOTP is enabled)
+5. Use your security device or enter your TOTP code when prompted
 6. You're signed in!
 
+### Security Key Sign-In
+1. Click **"Sign In with Security Key"**
+2. Use your security device when prompted
+3. **For Hardware Keys**: Insert your key and touch the metal contact
+4. **For Biometric**: Use your fingerprint, face, or PIN as prompted
+5. You're automatically redirected to your dashboard
+
+### Authenticator App Sign-In (TOTP)
+If you have TOTP enabled, you can use this backup method:
+1. Click **"Sign in with Authenticator App"**
+2. Open your authenticator app (Google Authenticator, Authy, etc.)
+3. Find your YuBlog account and note the 6-digit code
+4. Enter the code in the login form
+5. Click **"Sign In"**
+6. You're redirected to your dashboard
+
 ### What Happens During Sign-In
-- Your browser connects to your security device
-- The device verifies your identity (touch, biometric, PIN)
+- Your browser connects to your security device or verifies your TOTP code
+- The device/app verifies your identity
 - A secure token is created for your session
 - You're automatically redirected to your dashboard
 
 ### Troubleshooting Sign-In
 - **Device not detected**: Ensure it's properly connected/enabled
 - **Wrong username**: Check spelling and case sensitivity
+- **TOTP code invalid**: Ensure your device time is accurate and use the current code
 - **Timeout**: The process times out after 60 seconds - try again
 - **Browser issues**: Try refreshing the page
 
@@ -231,6 +251,154 @@ Each device shows:
 
 ---
 
+## Authenticator App Setup
+
+### What is TOTP Authentication?
+
+**TOTP (Time-based One-Time Password)** authentication provides a backup way to sign into your YuBlog account when your hardware security keys aren't available. This is especially useful when:
+
+- **Switching devices**: You want to sign in on your phone but registered with a YubiKey on your computer
+- **Device unavailable**: Your security key is at home but you need to post from work
+- **Cross-platform access**: Moving between different operating systems
+- **Emergency access**: Your primary device is lost or broken
+
+### Compatible Authenticator Apps
+
+YuBlog works with any RFC 6238 compliant TOTP authenticator app:
+
+- **Google Authenticator** (iOS/Android) - Simple and reliable
+- **Authy** (iOS/Android/Desktop) - Multi-device sync
+- **Microsoft Authenticator** (iOS/Android) - Enterprise features
+- **1Password** (All platforms) - Integrated with password manager
+- **Bitwarden** (All platforms) - Open source option
+- **LastPass Authenticator** (iOS/Android)
+- **Any other TOTP app** - Must support RFC 6238 standard
+
+### Security Requirements
+
+**Important**: You must already have a WebAuthn device registered before you can set up TOTP authentication. This prevents spam account creation while ensuring legitimate users have backup access.
+
+### Setting Up TOTP Authentication
+
+#### Step 1: Prerequisites
+1. **Sign in** to your YuBlog account using your security device
+2. **Verify** you have at least one WebAuthn device registered
+3. **Download** your preferred authenticator app on your phone
+
+#### Step 2: Access TOTP Setup
+1. Go to **Profile** → **Security Devices** tab
+2. Scroll down to the **"Authenticator App"** section
+3. Click **"Set Up Authenticator App"**
+
+#### Step 3: Scan QR Code
+1. **Open** your authenticator app
+2. **Tap** "Add Account" or "+" (varies by app)
+3. **Choose** "Scan QR Code" or "Scan Barcode"
+4. **Point** your phone camera at the QR code on screen
+5. **Confirm** the account is added (should show "YuBlog (your-username)")
+
+#### Step 4: Verify Setup
+1. **Check** your authenticator app shows a 6-digit code
+2. **Enter** the current code in the verification field
+3. **Click** "Verify and Complete Setup"
+4. **Success!** TOTP is now enabled
+
+#### Step 5: Save Backup Codes
+**Critical**: You'll be shown 8 backup recovery codes. These are essential for emergency access.
+
+1. **Copy** all 8 codes to a secure location
+2. **Store** them in a password manager or safe place
+3. **Each code** can only be used once
+4. **Don't lose them** - they're your last resort if everything else fails
+
+### Using TOTP for Sign-In
+
+#### When TOTP Login Appears
+After entering your username, if you have TOTP enabled, you'll see:
+- **"Sign in with Security Key"** (your primary method)
+- **"Sign in with Authenticator App"** (your backup method)
+
+#### TOTP Login Process
+1. **Click** "Sign in with Authenticator App"
+2. **Open** your authenticator app
+3. **Find** your YuBlog account
+4. **Enter** the current 6-digit code
+5. **Click** "Sign In"
+6. **You're in!** - redirected to your dashboard
+
+#### Using Backup Codes
+If you don't have access to your authenticator app:
+1. **Click** "Use backup code instead"
+2. **Enter** one of your saved 8-character backup codes
+3. **Click** "Sign In"
+4. **Important**: That code is now used up forever
+
+### Managing TOTP Authentication
+
+#### Checking Status
+In **Profile** → **Security Devices**, you'll see:
+- **"Authenticator App Enabled"** with a green checkmark
+- **Last used date** (when you last signed in with TOTP)
+- **Options** to disable or regenerate
+
+#### Disabling TOTP
+1. Go to **Profile** → **Security Devices**
+2. In the Authenticator App section, click **"Disable"**
+3. **Confirm** the action
+4. **Remove** YuBlog from your authenticator app
+5. TOTP is now disabled
+
+#### Regenerating Setup
+If you need to set up TOTP again (new phone, lost authenticator):
+1. **Disable** current TOTP (if enabled)
+2. **Follow** the setup process again
+3. **New QR code** and backup codes will be generated
+
+### Security Best Practices
+
+#### Protecting Your Authenticator
+- **Screen lock**: Always use a PIN, password, or biometric on your phone
+- **App security**: Enable app-specific locks if available
+- **Backup sync**: Consider apps like Authy that sync across devices
+- **Multiple devices**: Some apps let you add the same account to multiple devices
+
+#### Backup Strategy
+- **Save backup codes**: Store in a password manager or secure location
+- **Test regularly**: Occasionally test signing in with TOTP
+- **Update apps**: Keep your authenticator app updated
+- **Multiple methods**: Keep your WebAuthn devices as the primary method
+
+#### What NOT to Do
+- **Don't screenshot** QR codes (security risk)
+- **Don't share** backup codes with anyone
+- **Don't rely only** on TOTP - keep your security keys registered
+- **Don't use** the same TOTP for multiple critical accounts
+
+### Recovery Scenarios
+
+#### Lost Phone (Authenticator App)
+**If you have backup codes:**
+1. Use a backup code to sign in
+2. Go to Profile → Security Devices
+3. Set up TOTP again with your new phone
+
+**If you don't have backup codes:**
+1. Use your WebAuthn security device to sign in
+2. Disable and re-setup TOTP with your new phone
+
+#### Used All Backup Codes
+1. Sign in with your WebAuthn security device
+2. Disable current TOTP authentication
+3. Set up TOTP again to get new backup codes
+
+#### Lost Everything (Phone + Security Keys + Backup Codes)
+This is why we recommend multiple devices! If this happens:
+1. Contact YuBlog support immediately
+2. Provide account verification information
+3. Support will help restore access to your account
+
+---
+
 ## Account Settings
 
 ### Profile Information
@@ -354,13 +522,30 @@ If problems persist:
 A: No! YuBlog is completely passwordless. You only need your security device.
 
 **Q: What if I lose my security device?**  
-A: If you have multiple devices registered, use another one. If not, contact support for account recovery.
+A: If you have multiple devices registered or TOTP enabled, use those alternatives. If not, contact support for account recovery.
 
 **Q: Can I use YuBlog on my phone?**  
-A: Yes! Most modern phones support WebAuthn through biometrics or built-in security chips.
+A: Yes! Most modern phones support WebAuthn through biometrics or built-in security chips. You can also use TOTP authenticator apps.
 
 **Q: Is YuBlog free?**  
 A: Yes, YuBlog is currently free to use with no limits on posts or devices.
+
+### Authentication Questions
+
+**Q: What's the difference between WebAuthn and TOTP?**  
+A: WebAuthn uses hardware security keys or biometrics and is more secure. TOTP uses apps like Google Authenticator and serves as a backup method.
+
+**Q: Can I use only TOTP without a security key?**  
+A: No, you must register a WebAuthn device first. TOTP can only be set up after you have a security key registered.
+
+**Q: Which authenticator apps work with YuBlog?**  
+A: Any RFC 6238 compliant app: Google Authenticator, Authy, Microsoft Authenticator, 1Password, Bitwarden, LastPass Authenticator, and others.
+
+**Q: What are backup codes and why do I need them?**  
+A: Backup codes are 8 single-use codes for emergency access when your authenticator app isn't available. Store them securely!
+
+**Q: Can I set up TOTP on multiple phones?**  
+A: Some apps like Authy support multi-device sync. Others like Google Authenticator are single-device only.
 
 ### Security Questions
 

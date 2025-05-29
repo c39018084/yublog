@@ -361,6 +361,12 @@ Response:
 }
 ```
 
+### Supported WebAuthn Authenticators
+
+- **Hardware Security Keys**: YubiKey 5 Series, SoloKeys, Google Titan
+- **Platform Authenticators**: Touch ID (macOS), Windows Hello, Android Fingerprint
+- **Cross-Platform**: Any FIDO2/WebAuthn compatible device
+
 ### Blog Management Endpoints (Currently Implemented)
 
 ```http
@@ -920,11 +926,317 @@ sequenceDiagram
     B->>U: Redirect to dashboard
 ```
 
-### Supported Authenticators
+### TOTP Authentication Flow (Login-Only Backup Method)
 
-- **Hardware Security Keys**: YubiKey 5 Series, SoloKeys, Google Titan
-- **Platform Authenticators**: Touch ID (macOS), Windows Hello, Android Fingerprint
-- **Cross-Platform**: Any FIDO2/WebAuthn compatible device
+YuBlog implements TOTP (Time-based One-Time Password) as a backup authentication method following RFC 6238 and RFC 4226 standards.
+
+#### TOTP Setup Flow (Authenticated Users Only)
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant B as Browser
+    participant S as Server
+    participant A as Authenticator App
+    
+    Note over U,A: User must already have WebAuthn device registered
+    
+    U->>B: Navigate to Profile → Security Devices
+    B->>S: GET /api/auth/totp/status (authenticated)
+    S->>B: Return {enabled: false}
+    U->>B: Click "Set Up Authenticator App"
+    B->>S: POST /api/auth/totp/setup (authenticated)
+    S->>S: Generate TOTP secret & backup codes
+    S->>S: Encrypt secret & codes with AES-256-GCM
+    S->>S: Store in database
+    S->>B: Return QR code, manual key, backup codes
+    B->>U: Display QR code & backup codes
+    U->>A: Scan QR code
+    A->>A: Store TOTP secret
+    U->>U: Save backup codes securely
+    B->>U: TOTP setup complete
+```
+
+#### TOTP Login Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant B as Browser
+    participant S as Server
+    participant A as Authenticator App
+    
+    U->>B: Enter username on login page
+    B->>S: POST /api/auth/totp/check {username}
+    S->>B: Return {available: true}
+    B->>U: Show "Sign in with Authenticator App" option
+    U->>B: Click TOTP login option
+    U->>A: Open authenticator app
+    A->>U: Show 6-digit TOTP code
+    U->>B: Enter TOTP code
+    B->>S: POST /api/auth/totp/login {username, code}
+    S->>S: Verify TOTP code (30s window ±30s drift)
+    S->>S: Generate JWT token
+    S->>S: Create session
+    S->>B: Return {token, user, authMethod: 'totp'}
+    B->>U: Redirect to dashboard
+```
+
+#### TOTP Backup Code Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant B as Browser
+    participant S as Server
+    
+    U->>B: Click "Use backup code instead"
+    U->>B: Enter 8-character backup code
+    B->>S: POST /api/auth/totp/login {username, code, isBackupCode: true}
+    S->>S: Decrypt & verify backup code
+    S->>S: Mark backup code as used (single-use)
+    S->>S: Generate JWT token
+    S->>B: Return {token, user}
+    B->>U: Login successful + warning about backup code usage
+```
+
+### TOTP Security Implementation
+
+#### Server-Side Components
+
+**1. TOTP Module (`backend-js/src/totp.js`)**
+```javascript
+import speakeasy from 'speakeasy';
+import QRCode from 'qrcode';
+import crypto from 'crypto';
+
+const TOTP_CONFIG = {
+  window: 1,           // ±30 seconds clock drift tolerance
+  step: 30,            // 30-second time steps (RFC 6238)
+  digits: 6,           // 6-digit codes (industry standard)
+  algorithm: 'sha1',   // SHA-1 for TOTP compatibility
+  issuer: 'YuBlog',
+  backup_codes_count: 8,
+  backup_code_length: 8
+};
+
+// AES-256-GCM encryption for secrets and backup codes
+function encrypt(text) {
+  const algorithm = 'aes-256-gcm';
+  const key = Buffer.from(ENCRYPTION_KEY, 'hex');
+  const iv = crypto.randomBytes(16);
+  
+  const cipher = crypto.createCipherGCM(algorithm, key, iv);
+  let encrypted = cipher.update(text, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  
+  const authTag = cipher.getAuthTag();
+  
+  return {
+    encrypted,
+    iv: iv.toString('hex'),
+    authTag: authTag.toString('hex')
+  };
+}
+
+// Setup TOTP for authenticated user
+export async function setupTotp(userId, req) {
+  // Security check: require existing WebAuthn credentials
+  const userCredentials = await db.getUserCredentials(userId);
+  if (!userCredentials || userCredentials.length === 0) {
+    throw new Error('TOTP setup requires at least one WebAuthn credential');
+  }
+
+  // Generate TOTP secret (256-bit)
+  const secret = speakeasy.generateSecret({
+    name: `YuBlog (${req.user.username})`,
+    issuer: TOTP_CONFIG.issuer,
+    length: 32
+  });
+
+  // Generate backup codes
+  const backupCodes = generateBackupCodes();
+
+  // Encrypt sensitive data
+  const encryptedSecret = encrypt(secret.base32);
+  const encryptedBackupCodes = backupCodes.map(code => encrypt(code));
+
+  // Store in database
+  await db.createTotpAuthenticator({
+    userId,
+    secret: JSON.stringify(encryptedSecret),
+    name: 'Authenticator App',
+    backupCodes: encryptedBackupCodes.map(enc => JSON.stringify(enc))
+  });
+
+  // Generate QR code
+  const qrCodeUrl = await QRCode.toDataURL(secret.otpauth_url);
+
+  return {
+    qrCode: qrCodeUrl,
+    manualEntryKey: secret.base32,
+    backupCodes: backupCodes,
+    issuer: TOTP_CONFIG.issuer,
+    accountName: req.user.username
+  };
+}
+```
+
+**2. Database Schema Addition**
+```sql
+-- TOTP authenticator apps for backup authentication
+CREATE TABLE totp_authenticators (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    secret TEXT NOT NULL,                    -- Encrypted TOTP secret
+    name VARCHAR(255) DEFAULT 'Authenticator App',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_used TIMESTAMP WITH TIME ZONE,
+    is_active BOOLEAN DEFAULT TRUE,
+    backup_codes TEXT[],                     -- Encrypted backup recovery codes
+    
+    -- Security constraints
+    CONSTRAINT fk_totp_user FOREIGN KEY (user_id) REFERENCES users(id),
+    -- Only allow one TOTP authenticator per user for security
+    CONSTRAINT one_totp_per_user UNIQUE(user_id)
+);
+
+-- Indexes for performance
+CREATE INDEX idx_totp_user ON totp_authenticators(user_id);
+CREATE INDEX idx_totp_active ON totp_authenticators(user_id, is_active);
+```
+
+**3. API Endpoints**
+```javascript
+// TOTP setup (authenticated users only)
+app.post('/api/auth/totp/setup', authenticateToken, async (req, res) => {
+  const setup = await setupTotp(req.user.id, req);
+  res.json({
+    success: true,
+    qrCode: setup.qrCode,
+    manualEntryKey: setup.manualEntryKey,
+    backupCodes: setup.backupCodes
+  });
+});
+
+// TOTP login (public endpoint with rate limiting)
+app.post('/api/auth/totp/login', strictLimiter, async (req, res) => {
+  const { username, code, isBackupCode } = req.body;
+  
+  const user = await db.findUserByUsername(username);
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+
+  let result;
+  if (isBackupCode) {
+    result = await verifyBackupCode(user.id, code, req);
+  } else {
+    result = await verifyTotp(user.id, code, req);
+  }
+
+  if (result.verified) {
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '1h' });
+    res.json({ success: true, token, user, authMethod: 'totp' });
+  } else {
+    res.status(401).json({ error: result.error });
+  }
+});
+```
+
+#### Frontend Components
+
+**1. TOTP Integration in AuthPage (`frontend/src/pages/AuthPage.js`)**
+```javascript
+// Check TOTP availability for username
+useEffect(() => {
+  const checkTotp = async () => {
+    if (formData.username && mode === 'login') {
+      try {
+        const available = await checkTotpAvailable(formData.username);
+        setTotpAvailable(available);
+      } catch (error) {
+        setTotpAvailable(false);
+      }
+    }
+  };
+  const delayedCheck = setTimeout(checkTotp, 500); // Debounce
+  return () => clearTimeout(delayedCheck);
+}, [formData.username, mode]);
+
+// TOTP login handler
+const handleTotpLogin = async (e) => {
+  e.preventDefault();
+  const result = await loginWithTotp({
+    username: formData.username,
+    code: formData.totpCode,
+    isBackupCode: isBackupCode
+  });
+
+  if (result.token) {
+    login(result.token, result.user);
+  }
+};
+```
+
+**2. TOTP Management in ProfilePage**
+```javascript
+// TOTP setup in profile management
+const handleSetupTotp = async () => {
+  const setupData = await setupTotp();
+  setTotpSetupData(setupData);
+  setShowTotpSetup(true);
+};
+
+// TOTP status display
+{totpStatus.enabled ? (
+  <div className="totp-enabled">
+    <Smartphone className="icon" />
+    <span>Authenticator App Enabled</span>
+    <button onClick={handleDisableTotp}>Disable</button>
+  </div>
+) : (
+  <button onClick={handleSetupTotp}>Set Up Authenticator App</button>
+)}
+```
+
+### TOTP Security Features
+
+#### Encryption at Rest
+- **Algorithm**: AES-256-GCM for authenticated encryption
+- **Key Management**: Environment variable with secure random generation
+- **Data Encrypted**: TOTP secrets, backup codes
+- **IV Generation**: Cryptographically secure random IVs per encryption
+
+#### Rate Limiting & Brute Force Protection
+- **Endpoint Rate Limits**: 50 requests per 15 minutes for TOTP login
+- **Failed Attempt Tracking**: Monitor and log failed TOTP attempts
+- **Temporary Lockouts**: 15-minute lockout after 5 failed attempts
+- **Audit Logging**: All TOTP activities logged for security monitoring
+
+#### Backup Recovery System
+- **8 Single-Use Codes**: Generated using cryptographically secure random bytes
+- **Secure Storage**: Encrypted with same AES-256-GCM as TOTP secrets
+- **Usage Tracking**: Mark codes as used, prevent reuse
+- **Emergency Access**: Alternative when authenticator app unavailable
+
+#### Access Control
+- **Setup Restriction**: Requires existing WebAuthn device (prevents spam)
+- **Login-Only Usage**: Cannot create accounts with TOTP (security measure)
+- **User Isolation**: One TOTP authenticator per user maximum
+- **Privileged Operations**: Setup/disable require full authentication
+
+### Supported Authenticator Apps
+
+YuBlog's TOTP implementation is compatible with any RFC 6238 compliant authenticator:
+
+- **Google Authenticator** (iOS/Android)
+- **Authy** (Multi-device sync)
+- **Microsoft Authenticator** (Enterprise features)
+- **1Password** (Password manager integration)
+- **Bitwarden** (Open source)
+- **LastPass Authenticator**
+- **FreeOTP** (Red Hat open source)
 
 ### Future Authentication (Backend APIs Ready)
 

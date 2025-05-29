@@ -20,6 +20,7 @@ import {
   extractDeviceInfo,
   base64URLDecode
 } from './webauthn.js';
+import { setupTotp, verifyTotp, verifyBackupCode, disableTotp, getTotpStatus } from './totp.js';
 
 // Load environment variables
 dotenv.config();
@@ -187,6 +188,164 @@ app.post('/api/auth/webauthn/login/complete', strictLimiter, async (req, res) =>
   req.app.locals.db = db;
   req.app.locals.redis = redis;
   await completeAuthentication(req, res);
+});
+
+// TOTP Authentication Routes (Login-Only)
+app.post('/api/auth/totp/setup', authenticateToken, async (req, res) => {
+  try {
+    const setup = await setupTotp(req.user.id, req);
+    
+    res.json({
+      success: true,
+      qrCode: setup.qrCode,
+      manualEntryKey: setup.manualEntryKey,
+      backupCodes: setup.backupCodes,
+      issuer: setup.issuer,
+      accountName: setup.accountName
+    });
+  } catch (error) {
+    console.error('TOTP setup error:', error);
+    res.status(400).json({
+      error: error.message
+    });
+  }
+});
+
+app.post('/api/auth/totp/login', strictLimiter, async (req, res) => {
+  try {
+    const { username, code, isBackupCode } = req.body;
+    
+    if (!username || !code) {
+      return res.status(400).json({
+        error: 'Username and code are required'
+      });
+    }
+
+    // Find user by username
+    const user = await db.findUserByUsername(username);
+    if (!user) {
+      await logAuditEvent(null, 'totp_login_attempt', false, req, {
+        reason: 'user_not_found',
+        username: username
+      });
+      return res.status(401).json({
+        error: 'Invalid credentials'
+      });
+    }
+
+    let result;
+    if (isBackupCode) {
+      result = await verifyBackupCode(user.id, code, req);
+    } else {
+      result = await verifyTotp(user.id, code, req);
+    }
+
+    if (result.verified) {
+      // Generate JWT token for successful authentication
+      const token = jwt.sign(
+        { 
+          userId: user.id, 
+          username: user.username
+        },
+        JWT_SECRET,
+        { expiresIn: JWT_EXPIRES_IN }
+      );
+
+      // Create session
+      const sessionData = {
+        userId: user.id,
+        tokenHash: hashToken(token),
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+        expiresAt: new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)) // 7 days
+      };
+
+      await db.createSession(sessionData);
+
+      res.json({
+        success: true,
+        token: token,
+        user: {
+          id: user.id,
+          username: user.username,
+          displayName: user.display_name,
+          email: user.email
+        },
+        authMethod: 'totp'
+      });
+    } else {
+      res.status(401).json({
+        error: result.error || 'Invalid code'
+      });
+    }
+
+  } catch (error) {
+    console.error('TOTP login error:', error);
+    res.status(500).json({
+      error: 'Login failed'
+    });
+  }
+});
+
+app.get('/api/auth/totp/status', authenticateToken, async (req, res) => {
+  try {
+    const status = await getTotpStatus(req.user.id);
+    res.json(status);
+  } catch (error) {
+    console.error('TOTP status error:', error);
+    res.status(500).json({
+      error: 'Failed to get TOTP status'
+    });
+  }
+});
+
+app.post('/api/auth/totp/disable', authenticateToken, async (req, res) => {
+  try {
+    await disableTotp(req.user.id, req);
+    res.json({
+      success: true,
+      message: 'TOTP authenticator disabled'
+    });
+  } catch (error) {
+    console.error('TOTP disable error:', error);
+    res.status(500).json({
+      error: 'Failed to disable TOTP'
+    });
+  }
+});
+
+app.post('/api/auth/totp/check', async (req, res) => {
+  try {
+    const { username } = req.body;
+    
+    if (!username) {
+      return res.status(400).json({
+        error: 'Username is required'
+      });
+    }
+
+    // Find user by username (safe operation)
+    const user = await db.findUserByUsername(username);
+    if (!user) {
+      // Don't reveal that user doesn't exist for security
+      return res.json({
+        available: false
+      });
+    }
+
+    // Check if user has TOTP enabled
+    const hasTotp = await db.hasTotpAuthenticator(user.id);
+    
+    res.json({
+      available: hasTotp
+    });
+
+  } catch (error) {
+    console.error('TOTP check error:', error);
+    res.status(500).json({
+      error: 'Check failed'
+    });
+  }
 });
 
 // Enhanced JWT Authentication middleware with security features
