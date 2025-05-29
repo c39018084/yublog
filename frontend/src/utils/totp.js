@@ -26,7 +26,7 @@ export async function loginWithTotp({ username, code, isBackupCode = false }) {
   try {
     console.log('Starting TOTP login for:', username);
     
-    const { data } = await api.post('/auth/totp/login', {
+    const { data } = await api.post('/api/auth/totp/login', {
       username,
       code,
       isBackupCode
@@ -52,7 +52,7 @@ export async function checkTotpAvailable(username) {
   try {
     // We'll make a simple request to check if the user has TOTP enabled
     // This is a safe operation that doesn't reveal sensitive information
-    const { data } = await api.post('/auth/totp/check', { username });
+    const { data } = await api.post('/api/auth/totp/check', { username });
     return data.available || false;
   } catch (error) {
     // If the endpoint doesn't exist or fails, assume TOTP is not available
@@ -71,7 +71,7 @@ export async function setupTotp() {
       throw new TotpError('Authentication required');
     }
 
-    const { data } = await api.post('/auth/totp/setup', {}, {
+    const { data } = await api.post('/api/auth/totp/setup', {}, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -99,7 +99,7 @@ export async function getTotpStatus() {
       throw new TotpError('Authentication required');
     }
 
-    const { data } = await api.get('/auth/totp/status', {
+    const { data } = await api.get('/api/auth/totp/status', {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -127,7 +127,7 @@ export async function disableTotp() {
       throw new TotpError('Authentication required');
     }
 
-    const { data } = await api.post('/auth/totp/disable', {}, {
+    const { data } = await api.post('/api/auth/totp/disable', {}, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
