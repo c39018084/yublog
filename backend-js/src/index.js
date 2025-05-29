@@ -20,7 +20,7 @@ import {
   extractDeviceInfo,
   base64URLDecode
 } from './webauthn.js';
-import { setupTotp, verifyTotp, verifyBackupCode, disableTotp, getTotpStatus } from './totp.js';
+import { setupTotp, verifyTotp, verifyBackupCode, disableTotp, getTotpStatus, generateTotpSecret, completeTotpSetup } from './totp.js';
 
 // Load environment variables
 dotenv.config();
@@ -253,11 +253,12 @@ app.post('/api/auth/totp/login', strictLimiter, async (req, res) => {
 
       // Create session
       const sessionData = {
+        id: crypto.randomUUID(),
         userId: user.id,
         tokenHash: hashToken(token),
         ipAddress: req.ip,
         userAgent: req.get('User-Agent'),
-        expiresAt: new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)) // 7 days
+        expiresAt: new Date(Date.now() + (24 * 60 * 60 * 1000)) // 24 hours to match JWT expiration
       };
 
       await db.createSession(sessionData);
@@ -289,7 +290,9 @@ app.post('/api/auth/totp/login', strictLimiter, async (req, res) => {
 
 app.get('/api/auth/totp/status', authenticateToken, async (req, res) => {
   try {
+    console.log('TOTP status request received for user:', req.user.id);
     const status = await getTotpStatus(req.user.id);
+    console.log('TOTP status response:', status);
     res.json(status);
   } catch (error) {
     console.error('TOTP status error:', error);
@@ -348,16 +351,92 @@ app.post('/api/auth/totp/check', async (req, res) => {
   }
 });
 
+// New multi-step TOTP setup routes
+app.post('/api/auth/totp/generate', authenticateToken, async (req, res) => {
+  try {
+    const secret = await generateTotpSecret(req.user.id, req);
+    
+    res.json({
+      success: true,
+      qrCode: secret.qrCode,
+      manualEntryKey: secret.manualEntryKey,
+      secret: secret.secret, // Temporary secret for verification
+      issuer: secret.issuer,
+      accountName: secret.accountName
+    });
+  } catch (error) {
+    console.error('TOTP secret generation error:', error);
+    res.status(400).json({
+      error: error.message
+    });
+  }
+});
+
+app.post('/api/auth/totp/verify-setup', authenticateToken, async (req, res) => {
+  try {
+    const { secret, verificationCode } = req.body;
+    
+    console.log('TOTP verify-setup request received:', { 
+      userId: req.user.id, 
+      hasSecret: !!secret, 
+      hasCode: !!verificationCode 
+    });
+    
+    if (!secret || !verificationCode) {
+      return res.status(400).json({
+        error: 'Secret and verification code are required'
+      });
+    }
+
+    const result = await completeTotpSetup(req.user.id, secret, verificationCode, req);
+    
+    console.log('TOTP verify-setup result:', {
+      success: result.success,
+      hasBackupCodes: !!(result.backupCodes && result.backupCodes.length > 0),
+      backupCodesCount: result.backupCodes ? result.backupCodes.length : 0,
+      message: result.message
+    });
+    
+    res.json({
+      success: true,
+      backupCodes: result.backupCodes,
+      message: 'TOTP setup completed successfully'
+    });
+  } catch (error) {
+    console.error('TOTP verification error:', error);
+    res.status(400).json({
+      error: error.message
+    });
+  }
+});
+
+// Reset TOTP setup (cleanup incomplete setups)
+app.post('/api/auth/totp/reset', authenticateToken, async (req, res) => {
+  try {
+    await disableTotp(req.user.id, req);
+    res.json({
+      success: true,
+      message: 'TOTP setup reset successfully. You can now start a new setup.'
+    });
+  } catch (error) {
+    console.error('TOTP reset error:', error);
+    res.status(500).json({
+      error: 'Failed to reset TOTP setup'
+    });
+  }
+});
+
 // Enhanced JWT Authentication middleware with security features
 async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
-    await logAuditEvent(null, 'authentication_attempt', false, req, { 
-      reason: 'missing_token',
-      endpoint: req.path 
-    });
+    // Temporarily disabled audit logging due to constraint issue
+    // await logAuditEvent(null, 'authentication_attempt', false, req, { 
+    //   reason: 'missing_token',
+    //   endpoint: req.path 
+    // });
     return res.status(401).json({ 
       error: 'Access token required',
       code: 'TOKEN_MISSING'
@@ -373,10 +452,11 @@ async function authenticateToken(req, res, next) {
     const session = await db.getActiveSession(tokenHash);
     
     if (!session) {
-      await logAuditEvent(decoded.userId, 'authentication_attempt', false, req, { 
-        reason: 'invalid_session',
-        endpoint: req.path 
-      });
+      // Temporarily disabled audit logging due to constraint issue
+      // await logAuditEvent(decoded.userId, 'authentication_attempt', false, req, { 
+      //   reason: 'invalid_session',
+      //   endpoint: req.path 
+      // });
       return res.status(401).json({ 
         error: 'Invalid or expired session',
         code: 'SESSION_INVALID'
@@ -389,11 +469,12 @@ async function authenticateToken(req, res, next) {
     
     if (session.ip_address !== currentIP) {
       console.warn(`⚠️ IP address mismatch for user ${session.user_id}: ${session.ip_address} vs ${currentIP}`);
-      await logAuditEvent(session.user_id, 'session_ip_mismatch', false, req, {
-        original_ip: session.ip_address,
-        current_ip: currentIP,
-        session_id: session.id
-      });
+      // Temporarily disabled audit logging due to constraint issue
+      // await logAuditEvent(session.user_id, 'session_ip_mismatch', false, req, {
+      //   original_ip: session.ip_address,
+      //   current_ip: currentIP,
+      //   session_id: session.id
+      // });
       // In strict security mode, you might want to invalidate the session here
     }
     
@@ -429,11 +510,12 @@ async function authenticateToken(req, res, next) {
       errorMessage = 'Token is malformed';
     }
     
-    await logAuditEvent(null, 'authentication_attempt', false, req, { 
-      reason: errorCode.toLowerCase(),
-      error: error.message,
-      endpoint: req.path 
-    });
+    // Temporarily disabled audit logging due to constraint issue
+    // await logAuditEvent(null, 'authentication_attempt', false, req, { 
+    //   reason: errorCode.toLowerCase(),
+    //   error: error.message,
+    //   endpoint: req.path 
+    // });
     
     return res.status(403).json({ 
       error: errorMessage,

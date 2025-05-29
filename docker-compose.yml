@@ -128,6 +128,9 @@ services:
       WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
       WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN:-https://localhost}
       
+      # TOTP Configuration
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:-447a70b173d30065caa9b0bac55fcc1ca7d386efaff1ce0d1389bc69b45719ed}
+      
       # CORS Configuration
       CLIENT_ORIGIN: ${WEBAUTHN_ORIGIN:-https://localhost}
       

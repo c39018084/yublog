@@ -906,7 +906,7 @@ export async function completeAuthentication(req, res) {
       id: uuidv4(),
       userId: user.id,
       tokenHash,
-      expiresAt: new Date(Date.now() + (60 * 60 * 1000)), // 1 hour from now
+      expiresAt: new Date(Date.now() + (24 * 60 * 60 * 1000)), // 24 hours to match JWT expiration
       ipAddress: req.ip || 'unknown',
       userAgent: req.get('User-Agent') || 'unknown'
     };

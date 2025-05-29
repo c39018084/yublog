@@ -1,16 +1,6 @@
 import axios from 'axios';
 
-// Configure axios base URL
-const API_BASE_URL = process.env.REACT_APP_API_URL || '';
-const api = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-// Custom error class for TOTP operations
+// TOTP-specific error class
 class TotpError extends Error {
   constructor(message, details = {}) {
     super(message);
@@ -26,7 +16,7 @@ export async function loginWithTotp({ username, code, isBackupCode = false }) {
   try {
     console.log('Starting TOTP login for:', username);
     
-    const { data } = await api.post('/api/auth/totp/login', {
+    const { data } = await axios.post('/auth/totp/login', {
       username,
       code,
       isBackupCode
@@ -52,7 +42,7 @@ export async function checkTotpAvailable(username) {
   try {
     // We'll make a simple request to check if the user has TOTP enabled
     // This is a safe operation that doesn't reveal sensitive information
-    const { data } = await api.post('/api/auth/totp/check', { username });
+    const { data } = await axios.post('/auth/totp/check', { username });
     return data.available || false;
   } catch (error) {
     // If the endpoint doesn't exist or fails, assume TOTP is not available
@@ -62,44 +52,16 @@ export async function checkTotpAvailable(username) {
 }
 
 /**
- * Setup TOTP for the authenticated user
- */
-export async function setupTotp() {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new TotpError('Authentication required');
-    }
-
-    const { data } = await api.post('/api/auth/totp/setup', {}, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
-
-    return data;
-  } catch (error) {
-    console.error('TOTP setup error:', error);
-    
-    if (error.response?.data?.error) {
-      throw new TotpError(error.response.data.error);
-    } else {
-      throw new TotpError(error.message || 'TOTP setup failed');
-    }
-  }
-}
-
-/**
  * Get TOTP status for the authenticated user
  */
 export async function getTotpStatus() {
   try {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('yublog_token');
     if (!token) {
       throw new TotpError('Authentication required');
     }
 
-    const { data } = await api.get('/api/auth/totp/status', {
+    const { data } = await axios.get('/auth/totp/status', {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -122,12 +84,12 @@ export async function getTotpStatus() {
  */
 export async function disableTotp() {
   try {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('yublog_token');
     if (!token) {
       throw new TotpError('Authentication required');
     }
 
-    const { data } = await api.post('/api/auth/totp/disable', {}, {
+    const { data } = await axios.post('/auth/totp/disable', {}, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -145,10 +107,99 @@ export async function disableTotp() {
   }
 }
 
+/**
+ * Generate TOTP secret and QR code (without saving to database yet)
+ */
+export async function generateTotpSecret() {
+  try {
+    const token = localStorage.getItem('yublog_token');
+    if (!token) {
+      throw new TotpError('Authentication required');
+    }
+
+    const { data } = await axios.post('/auth/totp/generate', {}, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    return data;
+  } catch (error) {
+    console.error('TOTP secret generation error:', error);
+    
+    if (error.response?.data?.error) {
+      throw new TotpError(error.response.data.error);
+    } else {
+      throw new TotpError(error.message || 'Failed to generate TOTP secret');
+    }
+  }
+}
+
+/**
+ * Verify TOTP code and complete setup (saves to database)
+ */
+export async function verifyTotpSetup(secret, verificationCode) {
+  try {
+    const token = localStorage.getItem('yublog_token');
+    if (!token) {
+      throw new TotpError('Authentication required');
+    }
+
+    const { data } = await axios.post('/auth/totp/verify-setup', {
+      secret,
+      verificationCode
+    }, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    return data;
+  } catch (error) {
+    console.error('TOTP verification error:', error);
+    
+    if (error.response?.data?.error) {
+      throw new TotpError(error.response.data.error);
+    } else {
+      throw new TotpError(error.message || 'Failed to verify TOTP code');
+    }
+  }
+}
+
+/**
+ * Reset TOTP setup (cleanup incomplete setups)
+ */
+export async function resetTotpSetup() {
+  try {
+    const token = localStorage.getItem('yublog_token');
+    if (!token) {
+      throw new TotpError('Authentication required');
+    }
+
+    const { data } = await axios.post('/auth/totp/reset', {}, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    return data;
+  } catch (error) {
+    console.error('TOTP reset error:', error);
+    
+    if (error.response?.data?.error) {
+      throw new TotpError(error.response.data.error);
+    } else {
+      throw new TotpError(error.message || 'Failed to reset TOTP setup');
+    }
+  }
+}
+
 export default {
   loginWithTotp,
   checkTotpAvailable,
-  setupTotp,
   getTotpStatus,
-  disableTotp
+  disableTotp,
+  generateTotpSecret,
+  verifyTotpSetup,
+  resetTotpSetup
 }; 
