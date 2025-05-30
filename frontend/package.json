@@ -24,7 +24,7 @@
     "tailwindcss": "^3.4.14"
   },
   "scripts": {
-    "start": "FAST_REFRESH=false GENERATE_SOURCEMAP=false WDS_SOCKET_HOST=localhost WDS_SOCKET_PORT=443 WDS_SOCKET_PATH=/ws CHOKIDAR_USEPOLLING=true REACT_APP_WEBPACK_HOT=false WEBPACK_HOT=false react-scripts start",
+    "start": "FAST_REFRESH=false WDS_SOCKET_HOST=0.0.0.0 WDS_SOCKET_PORT=0 CHOKIDAR_USEPOLLING=true react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
