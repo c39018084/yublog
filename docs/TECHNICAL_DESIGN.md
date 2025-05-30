@@ -472,7 +472,7 @@ Response:
 ### Schema Definitions
 
 ```sql
--- Users table - Privacy-First Design (No PII Required)
+-- Users table - Privacy-First Design (Minimal PII collection)
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username VARCHAR(255) UNIQUE NOT NULL,

@@ -31,7 +31,7 @@ Welcome to **YuBlog** - a secure, modern blogging platform that prioritizes your
 - **Hardware Security Keys**: Support for YubiKeys, Touch ID, Face ID, and Windows Hello
 - **Rich Blog Editor**: Create beautiful posts with our intuitive editor
 - **Real-time Dashboard**: Track your posts, drafts, and device security
-- **Minimal Personal Details at Signup**: Only username required - no emails, phone numbers, or personal details needed at signup
+- **Minimal Personal Details at Signup**: Only username required - no emails, phone numbers, or other sensitive personal details needed at signup
 - **GDPR Compliant**: Minimal data collection by design
 - **34-Day Device Protection**: Prevents spam and abuse
 
@@ -66,7 +66,7 @@ Welcome to **YuBlog** - a secure, modern blogging platform that prioritizes your
    - **Username**: 3-50 characters, letters, numbers, hyphens, and underscores only
    - **Display Name**: Optional, how your name appears on posts
 
-**Privacy Note**: YuBlog only requires a username at signup - no emails, phone numbers, or personal details needed during registration! Perfect for privacy-conscious users.
+**Privacy Note**: YuBlog only requires a username at signup - no emails, phone numbers, or other sensitive personal details needed during registration! Perfect for privacy-conscious users.
 
 ### Step 3: Register Your Security Device
 1. Click **"Create Account"**
