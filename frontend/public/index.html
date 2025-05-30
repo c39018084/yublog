@@ -19,28 +19,64 @@
     
     <title>YuBlog - Secure Passwordless Blogging</title>
     
-    <!-- Disable WebSocket connections to prevent console errors -->
+    <!-- Aggressive WebSocket blocking to prevent console errors -->
     <script>
-      if (typeof WebSocket !== 'undefined') {
-        const OriginalWebSocket = WebSocket;
-        WebSocket = function(url, protocols) {
-          if (url && url.includes('/ws')) {
-            console.log('Blocking WebSocket connection to prevent console errors in proxy environment');
-            return {
+      (function() {
+        'use strict';
+        
+        // Store original WebSocket
+        var OriginalWebSocket = window.WebSocket;
+        
+        // Override WebSocket constructor
+        window.WebSocket = function(url, protocols) {
+          // Block any WebSocket connections that include /ws or websocket protocols
+          if (url && (url.includes('/ws') || url.includes('ws://') || url.includes('wss://') || url.includes('websocket'))) {
+            console.log('[WebSocket Blocker] Preventing WebSocket connection to:', url);
+            
+            // Return a dummy WebSocket object
+            var dummySocket = {
               addEventListener: function() {},
               removeEventListener: function() {},
               send: function() {},
               close: function() {},
-              readyState: 3 // CLOSED
+              dispatchEvent: function() {},
+              readyState: 3, // CLOSED
+              bufferedAmount: 0,
+              extensions: '',
+              protocol: '',
+              url: url,
+              CONNECTING: 0,
+              OPEN: 1,
+              CLOSING: 2,
+              CLOSED: 3,
+              onopen: null,
+              onmessage: null,
+              onerror: null,
+              onclose: null
             };
+            
+            // Simulate immediate close
+            setTimeout(function() {
+              if (dummySocket.onclose) {
+                dummySocket.onclose({ code: 1000, reason: 'Blocked by WebSocket override' });
+              }
+            }, 0);
+            
+            return dummySocket;
           }
+          
+          // Allow other WebSocket connections
           return new OriginalWebSocket(url, protocols);
         };
-        WebSocket.CONNECTING = OriginalWebSocket.CONNECTING;
-        WebSocket.OPEN = OriginalWebSocket.OPEN;
-        WebSocket.CLOSING = OriginalWebSocket.CLOSING;
-        WebSocket.CLOSED = OriginalWebSocket.CLOSED;
-      }
+        
+        // Copy static properties from original WebSocket
+        window.WebSocket.CONNECTING = 0;
+        window.WebSocket.OPEN = 1;
+        window.WebSocket.CLOSING = 2;
+        window.WebSocket.CLOSED = 3;
+        
+        console.log('[WebSocket Blocker] WebSocket override installed');
+      })();
     </script>
   </head>
   <body class="bg-gray-50 text-gray-900 antialiased">

@@ -27,10 +27,15 @@ ARG REACT_APP_WEBAUTHN_RP_ID
 ENV REACT_APP_API_URL=$REACT_APP_API_URL
 ENV REACT_APP_WEBAUTHN_RP_ID=$REACT_APP_WEBAUTHN_RP_ID
 
-# Disable WebSocket connections to prevent console errors in proxy setup
+# Disable WebSocket connections and hot reloading to prevent console errors
 ENV FAST_REFRESH=false
 ENV CHOKIDAR_USEPOLLING=true
 ENV GENERATE_SOURCEMAP=false
+ENV WDS_SOCKET_HOST=localhost
+ENV WDS_SOCKET_PORT=443
+ENV WDS_SOCKET_PATH=/ws
+ENV REACT_APP_WEBPACK_HOT=false
+ENV WEBPACK_HOT=false
 
 # Copy source code last (changes most frequently)
 COPY src/ ./src/
