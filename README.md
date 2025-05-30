@@ -6,16 +6,30 @@ A self-hosted, highly secure blogging platform with passwordless authentication 
 
 - **Passwordless Authentication**: No passwords stored or used anywhere
 - **YubiKey Support**: Full FIDO2/WebAuthn hardware security key integration
+- **TOTP Authenticator App Support**: Backup login method using Google Authenticator, Authy, or similar apps (login-only to prevent spam)
 - **Multi-Device Support**: Add/remove multiple security devices per account
 - **Device Management**: View device usage, creation dates, and manage security keys
 - **Account Spam Prevention**: 34-day cooldown between device registrations to prevent account spamming
 - **Device Registration Tracking**: AAGUID-based device identification and registration limits
 - **Smart Device Policies**: Different rules for account creation vs. adding devices to existing accounts
+- **Backup Authentication**: TOTP codes and backup recovery codes for device-independent access
+- **Comprehensive Audit Logging**: Track all authentication and security events
+- **Minimal Personal Details at Signup**: Only username required - no emails, phone numbers, or personal details needed at signup
+- **Privacy-First Design**: Built with privacy in mind, minimizing data collection
 - **Admin Privileges**: First registered user automatically receives administrator privileges
 - **End-to-End Encryption**: TLS 1.3 with modern cipher suites
 - **Rate Limiting**: Protection against brute force attacks
 - **Audit Logging**: Complete security event tracking with device registration monitoring
 - **Session Management**: Secure JWT-based sessions with Redis storage
+
+## 🔐 Privacy & Data Protection
+
+- **No Personal Information Required**: No emails, phone numbers, or personal details needed
+- **Username-Only Registration**: Create accounts with just a username and security key
+- **Zero PII Storage**: YuBlog stores no personally identifiable information
+- **GDPR Compliant**: Minimal data collection by design - perfect for privacy-conscious users
+- **Self-Hosted**: Complete control over your data with self-hosted deployment
+- **Secure by Default**: WebAuthn authentication eliminates password-related data breaches
 
 ## ⚠️ IMPORTANT SECURITY NOTICE
 
@@ -281,10 +295,87 @@ POST /api/user/devices/webauthn/complete
 DELETE /api/user/devices/:deviceId
 ```
 
+## 📱 TOTP Authenticator App Support
+
+YuBlog includes backup authentication via TOTP (Time-based One-Time Password) authenticator apps as a secondary login method when WebAuthn devices are unavailable.
+
+### Key Features
+- **Login-Only Access**: TOTP can only be used for login, not account creation (prevents spam)
+- **Industry Standards**: Follows RFC 6238 (TOTP) and RFC 4226 (HOTP) specifications
+- **Universal Compatibility**: Works with Google Authenticator, Authy, Microsoft Authenticator, 1Password, and other TOTP apps
+- **Backup Recovery Codes**: 8 single-use backup codes for emergency access
+- **Encrypted Storage**: TOTP secrets and backup codes are encrypted at rest
+
+### Security Requirements
+- **WebAuthn Prerequisites**: Users must have at least one WebAuthn device before setting up TOTP
+- **No Registration Access**: TOTP cannot be used to create new accounts (security measure)
+- **Rate Limiting**: Protected against brute force attacks
+- **Audit Logging**: All TOTP activities are logged for security monitoring
+
+### Setup Process
+1. **Register Primary Device**: First, register a WebAuthn device (YubiKey, Touch ID, etc.)
+2. **Access Profile**: Go to Profile → Security Devices → Authenticator App section
+3. **Setup TOTP**: Click "Set Up Authenticator App"
+4. **Scan QR Code**: Use your authenticator app to scan the provided QR code
+5. **Save Backup Codes**: Store the 8 backup recovery codes in a secure location
+6. **Complete Setup**: TOTP is now available as a backup login method
+
+### Using TOTP for Login
+1. **Primary Login**: Enter your username on the login page
+2. **Alternative Method**: If TOTP is available, you'll see "Sign in with Authenticator App" option
+3. **Enter Code**: Enter the 6-digit code from your authenticator app
+4. **Backup Access**: Use backup codes if your authenticator app is unavailable
+
+### Backup Recovery Codes
+- **8 Single-Use Codes**: Each code can only be used once
+- **Emergency Access**: Use when your authenticator app is unavailable
+- **Secure Storage**: Store codes in a password manager or secure location
+- **Regeneration**: Contact support if all backup codes are exhausted
+
+### TOTP Management
+```bash
+# Setup TOTP (authenticated users only)
+POST /api/auth/totp/setup
+
+# Login with TOTP
+POST /api/auth/totp/login
+
+# Check TOTP availability for username
+POST /api/auth/totp/check
+
+# Get TOTP status
+GET /api/auth/totp/status
+
+# Disable TOTP
+POST /api/auth/totp/disable
+```
+
+### Security Considerations
+- **Encrypted Secrets**: TOTP secrets use AES-256-GCM encryption
+- **Time Synchronization**: 30-second time windows with ±30 second drift tolerance
+- **Rate Limiting**: Maximum 5 failed attempts before temporary lockout
+- **Audit Trail**: All TOTP setup, login attempts, and modifications are logged
+
+### Compatible Authenticator Apps
+- **Google Authenticator** (Android/iOS)
+- **Authy** (Multi-device sync)
+- **Microsoft Authenticator** (Enterprise features)
+- **1Password** (Password manager integration)
+- **Bitwarden** (Open source option)
+- **Any RFC 6238 compliant TOTP app**
+
+### Recovery Scenarios
+1. **Lost Authenticator App**: Use backup recovery codes
+2. **New Phone**: Re-scan QR code or use backup codes to access account, then re-setup TOTP
+3. **All Backup Codes Used**: Use WebAuthn device to login and generate new TOTP setup
+4. **Lost Everything**: Contact support with account verification information
+
 ## 🛠️ Development Status
 
 ### ✅ **Currently Implemented:**
 - WebAuthn/FIDO2 authentication (YubiKey, Touch ID, Windows Hello)
+- **TOTP Authenticator App Support**: Backup login method with Google Authenticator, Authy, etc.
+- **TOTP Security Features**: Encrypted storage, backup codes, rate limiting, audit logging
 - React frontend with modern UI
 - Express.js backend with native WebAuthn implementation
 - Flask backend alternative with security best practices

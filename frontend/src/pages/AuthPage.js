@@ -1,30 +1,69 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { registerWebAuthn, authenticateWebAuthn, isWebAuthnSupported } from '../utils/webauthn';
+import { loginWithTotp, checkTotpAvailable } from '../utils/totp';
 import LoadingSpinner from '../components/LoadingSpinner';
 import AuthMessage from '../components/AuthMessage';
 import { Shield, Key, Smartphone, AlertTriangle, CheckCircle } from 'lucide-react';
 
 const AuthPage = () => {
   const [mode, setMode] = useState('login'); // 'login' or 'register'
+  const [loginTab, setLoginTab] = useState('webauthn'); // 'webauthn' or 'totp' when in login mode
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
-    username: ''
+    username: '',
+    totpCode: ''
   });
   const [webAuthnSupported, setWebAuthnSupported] = useState(false);
+  const [isBackupCode, setIsBackupCode] = useState(false);
+  const [totpUsernameEntered, setTotpUsernameEntered] = useState(false); // Track if username entered for TOTP
   const [message, setMessage] = useState(null);
   const { login } = useAuth();
+
+  const totpCodeInputRef = useRef(null);
+  const totpUsernameInputRef = useRef(null);
 
   useEffect(() => {
     setWebAuthnSupported(isWebAuthnSupported());
   }, []);
 
+  // Auto-focus appropriate input when switching to TOTP tab
+  useEffect(() => {
+    if (mode === 'login' && loginTab === 'totp') {
+      if (!totpUsernameEntered && totpUsernameInputRef.current) {
+        // Focus username field if not entered yet
+        setTimeout(() => {
+          totpUsernameInputRef.current?.focus();
+        }, 100);
+      } else if (totpUsernameEntered && totpCodeInputRef.current) {
+        // Focus code field if username already entered
+        setTimeout(() => {
+          totpCodeInputRef.current?.focus();
+        }, 100);
+      }
+    }
+  }, [mode, loginTab, totpUsernameEntered]);
+
   const handleInputChange = (e) => {
+    const { name, value } = e.target;
     setFormData({
       ...formData,
-      [e.target.name]: e.target.value
+      [name]: value
     });
+
+    // When username is entered in TOTP tab, show code fields and focus
+    if (name === 'username' && loginTab === 'totp' && value.trim().length > 0 && !totpUsernameEntered) {
+      setTotpUsernameEntered(true);
+      // Small delay to ensure code field is rendered before focusing
+      setTimeout(() => {
+        if (totpCodeInputRef.current) {
+          totpCodeInputRef.current.focus();
+        }
+      }, 100);
+    } else if (name === 'username' && loginTab === 'totp' && value.trim().length === 0) {
+      setTotpUsernameEntered(false);
+    }
   };
 
   const handleRegister = async (e) => {
@@ -245,10 +284,59 @@ const AuthPage = () => {
     }
   };
 
+  const handleTotpLogin = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setMessage(null);
+
+    try {
+      const result = await loginWithTotp({
+        username: formData.username,
+        code: formData.totpCode,
+        isBackupCode: isBackupCode
+      });
+
+      if (result.token) {
+        login(result.token, result.user);
+        
+        setMessage({
+          type: 'success',
+          title: 'Welcome Back!',
+          message: `Successfully authenticated with ${isBackupCode ? 'backup code' : 'authenticator app'}`,
+          autoHide: true,
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      console.error('TOTP login error:', error);
+      
+      setMessage({
+        type: 'error',
+        title: 'Authentication Failed',
+        message: error.message || 'Invalid code or username',
+        details: {
+          additionalInfo: isBackupCode 
+            ? 'Please check your backup code and try again. Each backup code can only be used once.'
+            : 'Please check your authenticator app and enter the current 6-digit code.'
+        }
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const switchMode = () => {
-    setMode(mode === 'login' ? 'register' : 'login');
-    setFormData({ username: '' });
-    setMessage(null); // Clear any existing messages when switching modes
+    if (mode === 'login') {
+      setMode('register');
+      setLoginTab('webauthn'); // Reset to webauthn tab when switching to register
+    } else {
+      setMode('login');
+      setLoginTab('webauthn'); // Reset to webauthn tab when switching to login
+    }
+    setFormData({ username: '', totpCode: '' });
+    setTotpUsernameEntered(false); // Reset TOTP username state
+    setMessage(null);
+    setIsBackupCode(false);
   };
 
   return (
@@ -274,7 +362,7 @@ const AuthPage = () => {
           </h2>
           <p className="mt-2 text-sm text-secondary-600">
             {mode === 'login' 
-              ? 'Sign in securely with your security key' 
+              ? `Sign in securely with your ${loginTab === 'webauthn' ? 'security key' : 'authenticator app'}` 
               : 'Register with passwordless authentication'
             }
           </p>
@@ -327,7 +415,63 @@ const AuthPage = () => {
           transition={{ delay: 0.3 }}
           className="card"
         >
-          <form onSubmit={mode === 'login' ? handleLogin : handleRegister} className="space-y-6">
+          {/* Login Tabs (only show in login mode) */}
+          {mode === 'login' && (
+            <div className="mb-6">
+              <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginTab('webauthn');
+                    setTotpUsernameEntered(false); // Reset when switching away from TOTP
+                  }}
+                  className={`flex-1 py-2 px-3 text-sm font-medium rounded-md transition-colors ${
+                    loginTab === 'webauthn'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <Key className="h-4 w-4 inline mr-2" />
+                  Security Key
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginTab('totp');
+                    setTotpUsernameEntered(false); // Reset when switching to TOTP
+                  }}
+                  className={`flex-1 py-2 px-3 text-sm font-medium rounded-md transition-colors ${
+                    loginTab === 'totp'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <Smartphone className="h-4 w-4 inline mr-2" />
+                  Authenticator App
+                </button>
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={
+            mode === 'login' ? (
+              loginTab === 'webauthn' ? handleLogin : 
+              loginTab === 'totp' ? (
+                totpUsernameEntered ? handleTotpLogin : 
+                (e) => {
+                  e.preventDefault();
+                  if (formData.username.trim()) {
+                    setTotpUsernameEntered(true);
+                    setTimeout(() => {
+                      if (totpCodeInputRef.current) {
+                        totpCodeInputRef.current.focus();
+                      }
+                    }, 100);
+                  }
+                }
+              ) : handleLogin
+            ) : handleRegister
+          } className="space-y-6">
             {/* Username Field */}
             <div>
               <label htmlFor="username" className="block text-sm font-medium text-secondary-700 mb-2">
@@ -343,32 +487,82 @@ const AuthPage = () => {
                 className="input-field"
                 placeholder="Enter your username"
                 disabled={isLoading}
+                ref={loginTab === 'totp' ? totpUsernameInputRef : null}
               />
+              {/* TOTP Instructions */}
+              {mode === 'login' && loginTab === 'totp' && !totpUsernameEntered && (
+                <p className="mt-2 text-sm text-gray-600">
+                  Enter your username to sign in with your authenticator app
+                </p>
+              )}
             </div>
+
+            {/* TOTP Code Field (only in TOTP tab and after username entered) */}
+            {mode === 'login' && loginTab === 'totp' && totpUsernameEntered && (
+              <div>
+                <label htmlFor="totpCode" className="block text-sm font-medium text-secondary-700 mb-2">
+                  {isBackupCode ? 'Backup Code' : 'Authenticator Code'}
+                </label>
+                <input
+                  id="totpCode"
+                  name="totpCode"
+                  type="text"
+                  required
+                  value={formData.totpCode}
+                  onChange={handleInputChange}
+                  className="input-field"
+                  placeholder={isBackupCode ? "Enter backup code" : "Enter 6-digit code"}
+                  disabled={isLoading}
+                  maxLength={isBackupCode ? 8 : 6}
+                  ref={totpCodeInputRef}
+                />
+                <div className="mt-2 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setIsBackupCode(!isBackupCode)}
+                    className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                    disabled={isLoading}
+                  >
+                    {isBackupCode ? 'Use authenticator code' : 'Use backup code instead'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={isLoading || !webAuthnSupported}
+              disabled={isLoading || (mode === 'login' && loginTab === 'webauthn' && !webAuthnSupported)}
               className={`w-full flex items-center justify-center py-3 text-base font-medium transition-all duration-200 ${
-                mode === 'login'
-                  ? 'btn-primary' // Blue for login
+                mode === 'login' && loginTab === 'webauthn'
+                  ? 'btn-primary' // Blue for WebAuthn login
+                  : mode === 'login' && loginTab === 'totp'
+                  ? 'bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white shadow-lg hover:shadow-xl disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed rounded-lg font-medium transition-all duration-200' // Purple for TOTP
                   : 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-lg hover:shadow-xl disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed rounded-lg font-medium transition-all duration-200' // Green for registration
               }`}
             >
               {isLoading ? (
                 <div className="flex items-center justify-center">
                   <LoadingSpinner size="small" className="mr-2" />
-                  {mode === 'login' ? 'Authenticating...' : 'Creating Account...'}
+                  {mode === 'login' && loginTab === 'webauthn' ? 'Authenticating...' : mode === 'login' && loginTab === 'totp' ? 'Verifying...' : 'Creating Account...'}
                 </div>
               ) : (
                 <div className="flex items-center justify-center">
-                  {mode === 'login' ? (
+                  {mode === 'login' && loginTab === 'webauthn' ? (
                     <Key className="h-5 w-5 mr-2" />
+                  ) : mode === 'login' && loginTab === 'totp' ? (
+                    <Smartphone className="h-5 w-5 mr-2" />
                   ) : (
                     <CheckCircle className="h-5 w-5 mr-2" />
                   )}
-                  {mode === 'login' ? 'Sign In with Security Key' : 'Create Account with Security Key'}
+                  {mode === 'login' && loginTab === 'webauthn'
+                    ? 'Sign In with Security Key' 
+                    : mode === 'login' && loginTab === 'totp'
+                    ? totpUsernameEntered 
+                      ? `Verify ${isBackupCode ? 'Backup Code' : 'Authenticator Code'}`
+                      : 'Continue with Username'
+                    : 'Create Account with Security Key'
+                  }
                 </div>
               )}
             </button>

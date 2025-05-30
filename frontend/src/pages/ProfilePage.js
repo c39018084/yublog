@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Shield, Trash2, Calendar, Smartphone, AlertCircle, BookOpen, Edit3, Eye, Plus } from 'lucide-react';
 import axios from 'axios';
 import { registerAdditionalDevice } from '../utils/webauthn';
+import { getTotpStatus, disableTotp, generateTotpSecret, verifyTotpSetup, resetTotpSetup } from '../utils/totp';
 import AuthMessage from '../components/AuthMessage';
 import ConfirmationModal from '../components/ConfirmationModal';
 
@@ -22,6 +23,16 @@ const ProfilePage = () => {
   const [showAddDeviceModal, setShowAddDeviceModal] = useState(false);
   const [newDeviceName, setNewDeviceName] = useState('');
   
+  // TOTP state
+  const [totpStatus, setTotpStatus] = useState({ enabled: false, lastUsed: null });
+  const [settingUpTotp, setSettingUpTotp] = useState(false);
+  const [showTotpSetup, setShowTotpSetup] = useState(false);
+  const [totpSetupData, setTotpSetupData] = useState(null);
+  const [disablingTotp, setDisablingTotp] = useState(false);
+  const [totpSetupStep, setTotpSetupStep] = useState(1); // 1: QR Code, 2: Verify, 3: Backup Codes
+  const [totpVerificationCode, setTotpVerificationCode] = useState('');
+  const [verifyingTotp, setVerifyingTotp] = useState(false);
+  
   // Message and confirmation state
   const [message, setMessage] = useState(null);
   const [confirmationModal, setConfirmationModal] = useState({
@@ -35,13 +46,16 @@ const ProfilePage = () => {
     onConfirm: null
   });
 
+  const totpVerificationInputRef = useRef(null);
+
   useEffect(() => {
-    if (activeTab === 'devices') {
+    if (activeTab === 'devices' && user) {
       fetchDevices();
-    } else if (activeTab === 'posts') {
+      fetchTotpStatus();
+    } else if (activeTab === 'posts' && user) {
       fetchUserPosts();
     }
-  }, [activeTab]);
+  }, [activeTab, user]);
 
   useEffect(() => {
     const tab = searchParams.get('tab');
@@ -49,6 +63,23 @@ const ProfilePage = () => {
       setActiveTab(tab);
     }
   }, [searchParams]);
+
+  // Auto-focus the TOTP verification input when step 2 is shown
+  useEffect(() => {
+    if (totpSetupStep === 2 && totpVerificationInputRef.current) {
+      // Small delay to ensure the DOM element is ready
+      setTimeout(() => {
+        totpVerificationInputRef.current?.focus();
+      }, 100);
+    }
+  }, [totpSetupStep]);
+
+  // Update URL parameters when tab changes
+  useEffect(() => {
+    setSearchParams({ tab: activeTab });
+    // Clear any existing messages when switching tabs
+    setMessage(null);
+  }, [activeTab, setSearchParams]);
 
   const showMessage = (type, title, messageText, details = {}) => {
     setMessage({
@@ -284,6 +315,170 @@ const ProfilePage = () => {
     }
   };
 
+  // TOTP Management Functions
+  const fetchTotpStatus = async () => {
+    try {
+      console.log('Fetching TOTP status...');
+      const status = await getTotpStatus();
+      console.log('TOTP status received:', status);
+      setTotpStatus(status);
+    } catch (error) {
+      console.error('Failed to fetch TOTP status:', error);
+      // Don't show error message as this is not critical
+    }
+  };
+
+  const handleSetupTotp = async () => {
+    try {
+      setSettingUpTotp(true);
+      // Step 1: Generate QR code and secret (without saving to database yet)
+      const setupData = await generateTotpSecret();
+      setTotpSetupData(setupData);
+      setTotpSetupStep(1);
+      setShowTotpSetup(true);
+    } catch (error) {
+      console.error('Failed to generate TOTP secret:', error);
+      showMessage('error', 'TOTP Setup Failed', error.message || 'Failed to generate authenticator setup', {
+        additionalInfo: 'Make sure you have at least one WebAuthn device registered before setting up TOTP.'
+      });
+    } finally {
+      setSettingUpTotp(false);
+    }
+  };
+
+  const handleTotpVerification = async () => {
+    if (!totpVerificationCode.trim()) {
+      showMessage('error', 'Verification Required', 'Please enter the 6-digit code from your authenticator app.');
+      return;
+    }
+
+    try {
+      setVerifyingTotp(true);
+      // Step 2: Verify the code and complete setup
+      const result = await verifyTotpSetup(totpSetupData.secret, totpVerificationCode);
+      
+      console.log('TOTP verification result:', result);
+      console.log('Backup codes received:', result.backupCodes);
+      console.log('Backup codes length:', result.backupCodes ? result.backupCodes.length : 'undefined');
+      
+      // Check if we got backup codes or if TOTP was already enabled
+      if (result.backupCodes && result.backupCodes.length > 0) {
+        console.log('Moving to step 3 with backup codes:', result.backupCodes);
+        // Update setup data with backup codes for display
+        setTotpSetupData(prev => ({
+          ...prev,
+          backupCodes: result.backupCodes
+        }));
+        // Move to step 3: Show backup codes
+        setTotpSetupStep(3);
+      } else {
+        console.log('No backup codes received, completing setup directly');
+        // TOTP was already enabled, skip to completion
+        handleTotpSetupComplete();
+        showMessage('success', 'TOTP Setup Complete', 'Your authenticator app has been verified successfully!', {
+          icon: '📱',
+          features: [
+            'Backup login method enabled',
+            'Compatible with Google Authenticator, Authy, and more',
+            'TOTP authentication ready'
+          ],
+          additionalInfo: 'You can now login with your authenticator app when WebAuthn is not available.'
+        });
+      }
+      
+      // Refresh TOTP status
+      await fetchTotpStatus();
+    } catch (error) {
+      console.error('Failed to verify TOTP:', error);
+      showMessage('error', 'Verification Failed', error.message || 'Invalid code. Please try again.', {
+        additionalInfo: 'Make sure the code is current and entered correctly.'
+      });
+    } finally {
+      setVerifyingTotp(false);
+    }
+  };
+
+  const handleTotpSetupComplete = () => {
+    setShowTotpSetup(false);
+    setTotpSetupData(null);
+    setTotpSetupStep(1);
+    setTotpVerificationCode('');
+    
+    showMessage('success', 'TOTP Setup Complete', 'Your authenticator app has been set up successfully!', {
+      icon: '📱',
+      features: [
+        'Backup login method enabled',
+        'Compatible with Google Authenticator, Authy, and more',
+        'Secure backup codes saved'
+      ],
+      additionalInfo: 'You can now login with your authenticator app when WebAuthn is not available.'
+    });
+  };
+
+  const handleDisableTotp = async () => {
+    setConfirmationModal({
+      isOpen: true,
+      type: 'danger',
+      title: 'Disable Authenticator App',
+      message: 'This will disable your authenticator app as a backup login method. You will only be able to login with your security keys.',
+      itemName: 'Authenticator App Access',
+      itemType: 'TOTP Authentication',
+      confirmText: 'Disable TOTP',
+      onConfirm: confirmDisableTotp
+    });
+  };
+
+  const confirmDisableTotp = async () => {
+    setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+    
+    try {
+      setDisablingTotp(true);
+      await disableTotp();
+      
+      // Refresh TOTP status
+      await fetchTotpStatus();
+      setTotpSetupData(null);
+      setShowTotpSetup(false);
+      
+      showMessage('success', 'TOTP Disabled', 'Your authenticator app has been disabled successfully.', {
+        icon: '🔒',
+        additionalInfo: 'You can only login with your WebAuthn security keys now. You can re-enable TOTP at any time.'
+      });
+    } catch (error) {
+      console.error('Failed to disable TOTP:', error);
+      showMessage('error', 'Failed to Disable TOTP', error.message || 'Failed to disable authenticator app', {
+        additionalInfo: 'Please try again or contact support if the problem persists.'
+      });
+    } finally {
+      setDisablingTotp(false);
+    }
+  };
+
+  const handleResetTotpSetup = async () => {
+    try {
+      await resetTotpSetup();
+      
+      // Reset all TOTP setup state
+      setShowTotpSetup(false);
+      setTotpSetupData(null);
+      setTotpSetupStep(1);
+      setTotpVerificationCode('');
+      
+      // Refresh TOTP status
+      await fetchTotpStatus();
+      
+      showMessage('success', 'Setup Reset', 'TOTP setup has been reset. You can now start a new setup.', {
+        icon: '🔄',
+        additionalInfo: 'Any previous incomplete setup has been cleared. Click "Set Up Authenticator App" to try again.'
+      });
+    } catch (error) {
+      console.error('Failed to reset TOTP setup:', error);
+      showMessage('error', 'Reset Failed', error.message || 'Failed to reset TOTP setup', {
+        additionalInfo: 'Please try refreshing the page or contact support if the problem persists.'
+      });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -348,13 +543,6 @@ const ProfilePage = () => {
                     Username
                   </label>
                   <div className="text-gray-900 font-medium">{user?.username}</div>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Email
-                  </label>
-                  <div className="text-gray-900">{user?.email || 'Not provided'}</div>
                 </div>
                 
                 <div>
@@ -493,6 +681,139 @@ const ProfilePage = () => {
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* TOTP Authenticator Section */}
+              <div className="card mt-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Authenticator App
+                  </h3>
+                  <div className="flex items-center text-sm text-gray-500">
+                    <Smartphone className="h-4 w-4 mr-1" />
+                    Backup Login Method
+                  </div>
+                </div>
+
+                {totpStatus.enabled ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                      <div className="flex items-start space-x-4">
+                        <div className="p-2 bg-purple-100 rounded-lg">
+                          <Smartphone className="h-5 w-5 text-purple-600" />
+                        </div>
+                        <div>
+                          <h4 className="font-medium text-gray-900">
+                            Authenticator App Enabled
+                          </h4>
+                          <div className="text-sm text-gray-500 space-y-1">
+                            <div className="flex items-center">
+                              <Calendar className="h-3 w-3 mr-1" />
+                              Set up {totpStatus.createdAt ? formatDate(totpStatus.createdAt) : 'recently'}
+                            </div>
+                            {totpStatus.lastUsed && (
+                              <div className="flex items-center">
+                                <Calendar className="h-3 w-3 mr-1" />
+                                Last used {formatDate(totpStatus.lastUsed)}
+                              </div>
+                            )}
+                            <div className="text-xs text-gray-400">
+                              Compatible with Google Authenticator, Authy, and more
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={handleDisableTotp}
+                        disabled={disablingTotp}
+                        className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                        title="Disable TOTP"
+                      >
+                        {disablingTotp ? (
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-600"></div>
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+
+                    {showTotpSetup && totpSetupData && (
+                      <div className="p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                        <h4 className="font-medium text-purple-900 mb-3">Setup Complete!</h4>
+                        <div className="space-y-3">
+                          <div>
+                            <p className="text-sm text-purple-800 mb-2">
+                              Your backup codes (save these securely):
+                            </p>
+                            <div className="bg-white p-3 rounded border text-xs font-mono space-y-1">
+                              {totpSetupData.backupCodes?.map((code, index) => (
+                                <div key={index} className="text-gray-800">{code}</div>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="text-xs text-purple-700">
+                            You can now login with codes from your authenticator app or these backup codes when WebAuthn is not available.
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <Smartphone className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <h4 className="text-lg font-medium text-gray-900 mb-2">
+                      Authenticator App Not Set Up
+                    </h4>
+                    <p className="text-gray-600 mb-4">
+                      Add a backup login method using Google Authenticator, Authy, or similar apps.
+                    </p>
+                    {devices.length > 0 ? (
+                      <button
+                        onClick={handleSetupTotp}
+                        disabled={settingUpTotp}
+                        className="bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white py-2 px-4 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 mx-auto"
+                      >
+                        {settingUpTotp ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                            <span>Setting up...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Smartphone className="h-4 w-4" />
+                            <span>Set Up Authenticator App</span>
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                        <div className="flex items-start">
+                          <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 mr-3 flex-shrink-0" />
+                          <div className="text-sm text-amber-800">
+                            <p className="font-medium mb-1">WebAuthn Device Required</p>
+                            <p>
+                              You need at least one WebAuthn security device before you can set up an authenticator app backup method.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-start">
+                    <Smartphone className="h-5 w-5 text-blue-600 mt-0.5 mr-3 flex-shrink-0" />
+                    <div className="text-sm text-blue-800">
+                      <p className="font-medium mb-1">Backup Authentication</p>
+                      <p>
+                        Authenticator apps provide a backup way to login when your WebAuthn devices are not available. 
+                        This is especially useful when switching between devices or traveling.
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </motion.div>
           )}
@@ -664,6 +985,194 @@ const ProfilePage = () => {
                   Cancel
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* TOTP Setup Modal */}
+        {showTotpSetup && totpSetupData && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-lg p-6 max-w-lg w-full mx-4"
+            >
+              {/* Step 1: Show QR Code */}
+              {totpSetupStep === 1 && (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Set Up Authenticator App
+                    </h3>
+                    <div className="text-sm text-gray-500">Step 1 of 3</div>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    <div className="text-center">
+                      <p className="text-sm text-gray-600 mb-4">
+                        Scan this QR code with your authenticator app:
+                      </p>
+                      <div className="bg-white p-4 rounded-lg border-2 border-gray-200 inline-block">
+                        <img src={totpSetupData.qrCode} alt="TOTP QR Code" className="w-48 h-48" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-sm font-medium text-gray-700 mb-2">
+                        Or enter this code manually:
+                      </p>
+                      <div className="bg-gray-50 p-3 rounded border text-sm font-mono text-center">
+                        {totpSetupData.manualEntryKey}
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                      <div className="flex items-start">
+                        <Smartphone className="h-5 w-5 text-purple-600 mt-0.5 mr-3 flex-shrink-0" />
+                        <div className="text-sm text-purple-800">
+                          <p className="font-medium mb-1">Compatible Apps</p>
+                          <p>
+                            Works with Google Authenticator, Authy, Microsoft Authenticator, 1Password, and other TOTP apps.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between mt-6">
+                    <button
+                      onClick={() => {
+                        setShowTotpSetup(false);
+                        setTotpSetupData(null);
+                        setTotpSetupStep(1);
+                      }}
+                      className="btn-secondary"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => setTotpSetupStep(2)}
+                      className="btn-primary"
+                    >
+                      Next: Verify
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Step 2: Verify Code */}
+              {totpSetupStep === 2 && (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Verify Authenticator App
+                    </h3>
+                    <div className="text-sm text-gray-500">Step 2 of 3</div>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    <div>
+                      <p className="text-sm text-gray-600 mb-4">
+                        Enter the 6-digit code from your authenticator app to verify it's working:
+                      </p>
+                      <input
+                        type="text"
+                        value={totpVerificationCode}
+                        onChange={(e) => setTotpVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="000000"
+                        className="w-full px-4 py-3 text-center text-2xl font-mono border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        maxLength={6}
+                        autoComplete="one-time-code"
+                        disabled={verifyingTotp}
+                        ref={totpVerificationInputRef}
+                      />
+                    </div>
+
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <div className="flex items-start">
+                        <Shield className="h-5 w-5 text-blue-600 mt-0.5 mr-3 flex-shrink-0" />
+                        <div className="text-sm text-blue-800">
+                          <p className="font-medium mb-1">Having trouble?</p>
+                          <p>
+                            Make sure your device's time is accurate. TOTP codes change every 30 seconds.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between mt-6">
+                    <button
+                      onClick={() => setTotpSetupStep(1)}
+                      className="btn-secondary"
+                      disabled={verifyingTotp}
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={handleTotpVerification}
+                      disabled={verifyingTotp || totpVerificationCode.length !== 6}
+                      className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {verifyingTotp ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          Verifying...
+                        </>
+                      ) : (
+                        'Verify & Continue'
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Step 3: Show Backup Codes */}
+              {totpSetupStep === 3 && (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Save Your Backup Codes
+                    </h3>
+                    <div className="text-sm text-gray-500">Step 3 of 3</div>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700 mb-2">
+                        Save these backup codes in a secure location:
+                      </p>
+                      <div className="bg-gray-50 p-4 rounded border text-xs font-mono space-y-1 max-h-32 overflow-y-auto">
+                        {totpSetupData.backupCodes?.map((code, index) => (
+                          <div key={index} className="text-gray-800">{code}</div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
+                      <div className="flex items-start">
+                        <Shield className="h-5 w-5 text-orange-600 mt-0.5 mr-3 flex-shrink-0" />
+                        <div className="text-sm text-orange-800">
+                          <p className="font-medium mb-1">Important!</p>
+                          <p>
+                            Each backup code can only be used once. Store them securely - you'll need them if you lose access to your authenticator app.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end mt-6">
+                    <button
+                      onClick={handleTotpSetupComplete}
+                      className="btn-primary"
+                    >
+                      Complete Setup
+                    </button>
+                  </div>
+                </>
+              )}
             </motion.div>
           </div>
         )}

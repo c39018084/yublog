@@ -55,6 +55,23 @@ CREATE TABLE credentials (
     CONSTRAINT fk_credential_user FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
+-- TOTP authenticator apps for backup authentication
+CREATE TABLE totp_authenticators (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    secret TEXT NOT NULL, -- Encrypted TOTP secret
+    name VARCHAR(255) DEFAULT 'Authenticator App',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_used TIMESTAMP WITH TIME ZONE,
+    is_active BOOLEAN DEFAULT TRUE,
+    backup_codes TEXT[], -- Encrypted backup recovery codes
+    
+    -- Security constraints
+    CONSTRAINT fk_totp_user FOREIGN KEY (user_id) REFERENCES users(id),
+    -- Only allow one TOTP authenticator per user for security
+    CONSTRAINT one_totp_per_user UNIQUE(user_id)
+);
+
 -- Registered devices for QR code authentication
 CREATE TABLE devices (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -160,7 +177,8 @@ CREATE TABLE audit_logs (
         'remove_credential', 'register_device', 'remove_device',
         'create_post', 'update_post', 'delete_post', 'publish_post',
         'access_denied', 'rate_limit_exceeded', 'device_registration_blocked',
-        'admin_privilege_granted', 'account_creation_attempt'
+        'admin_privilege_granted', 'account_creation_attempt', 'totp_setup',
+        'totp_login_attempt', 'totp_login_success', 'totp_disable', 'totp_backup_code_used'
     ))
 );
 
@@ -200,6 +218,9 @@ CREATE INDEX idx_audit_user ON audit_logs(user_id, created_at DESC);
 CREATE INDEX idx_audit_action ON audit_logs(action, created_at DESC);
 CREATE INDEX idx_audit_timeline ON audit_logs(created_at DESC);
 CREATE INDEX idx_audit_resource ON audit_logs(resource_type, resource_id);
+
+CREATE INDEX idx_totp_user ON totp_authenticators(user_id);
+CREATE INDEX idx_totp_active ON totp_authenticators(user_id, is_active);
 
 -- Automatic updated_at triggers
 CREATE OR REPLACE FUNCTION update_updated_at_column()
