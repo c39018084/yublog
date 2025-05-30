@@ -45,14 +45,14 @@ export const db = {
 
   // User operations
   async createUser(userData) {
-    const { username, email, displayName } = userData;
+    const { username, displayName } = userData;
     const id = uuidv4();
     const query = `
-      INSERT INTO users (id, username, email, display_name, created_at, updated_at, is_active)
-      VALUES ($1, $2, $3, $4, NOW(), NOW(), true)
+      INSERT INTO users (id, username, display_name, created_at, updated_at, is_active)
+      VALUES ($1, $2, $3, NOW(), NOW(), true)
       RETURNING *
     `;
-    const values = [id, username, email, displayName];
+    const values = [id, username, displayName];
     const result = await pool.query(query, values);
     return result.rows[0];
   },
@@ -60,7 +60,7 @@ export const db = {
   async findUserByUsername(username) {
     const query = `
       SELECT * FROM users 
-      WHERE (username = $1 OR email = $1) AND is_active = true
+      WHERE username = $1 AND is_active = true
     `;
     const result = await pool.query(query, [username]);
     return result.rows[0];
@@ -538,7 +538,7 @@ export const db = {
   },
 
   async debugGetUsers() {
-    const query = 'SELECT id, username, email, display_name, created_at FROM users ORDER BY created_at DESC LIMIT 10';
+    const query = 'SELECT id, username, display_name, created_at FROM users ORDER BY created_at DESC LIMIT 10';
     const result = await pool.query(query);
     return result.rows;
   },

@@ -52,7 +52,7 @@ export const AuthProvider = ({ children }) => {
   const fetchUserProfile = async () => {
     try {
       console.log('Fetching user profile...');
-      const response = await axios.get('/user/profile');
+      const response = await axios.get('/api/user/profile');
       console.log('Profile fetch successful:', response.data);
       setUser(response.data);
     } catch (error) {
@@ -89,7 +89,7 @@ export const AuthProvider = ({ children }) => {
     try {
       // Call logout endpoint if token exists
       if (token) {
-        await axios.post('/auth/logout');
+        await axios.post('/api/auth/logout');
       }
     } catch (error) {
       console.error('Logout error:', error);

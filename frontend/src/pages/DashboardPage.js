@@ -50,16 +50,6 @@ const DashboardPage = () => {
         ...postStats,
         deviceCount: devices.length
       });
-      
-      showMessage('success', 'Dashboard Updated', 'Your latest activity and device status have been refreshed.', {
-        icon: '📊',
-        features: [
-          'Security devices verified',
-          'Post statistics updated',
-          'Account activity tracked'
-        ],
-        autoHide: true
-      });
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
       showMessage('error', 'Failed to Load Dashboard Data', 'Unable to retrieve your dashboard information. Please refresh the page and try again.', {

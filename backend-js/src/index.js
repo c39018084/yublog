@@ -128,10 +128,6 @@ const userRegistrationValidation = [
     .isLength({ min: 3, max: 50 })
     .matches(/^[A-Za-z0-9_-]+$/)
     .withMessage('Username must be 3-50 characters and contain only letters, numbers, hyphens, and underscores'),
-  body('email')
-    .optional()
-    .isEmail()
-    .withMessage('Must be a valid email address'),
   body('display_name')
     .optional()
     .isLength({ min: 1, max: 255 })
@@ -269,8 +265,7 @@ app.post('/api/auth/totp/login', strictLimiter, async (req, res) => {
         user: {
           id: user.id,
           username: user.username,
-          displayName: user.display_name,
-          email: user.email
+          displayName: user.display_name
         },
         authMethod: 'totp'
       });
@@ -536,7 +531,6 @@ app.get('/api/user/profile', authenticateToken, async (req, res) => {
     res.json({
       id: user.id,
       username: user.username,
-      email: user.email,
       displayName: user.display_name,
       createdAt: user.created_at
     });

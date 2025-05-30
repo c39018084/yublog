@@ -437,11 +437,10 @@ Response:
 ├─────────────────┤    ├─────────────────┤    
 │ id (UUID) PK    │    │ id (UUID) PK    │    
 │ username        │◄──►│ user_id FK      │    
-│ email           │    │ credential_id   │    
-│ display_name    │    │ public_key      │    
-│ created_at      │    │ counter         │    
-│ updated_at      │    │ created_at      │    
-│ is_active       │    │ last_used       │    
+│ display_name    │    │ credential_id   │    
+│ created_at      │    │ public_key      │    
+│ updated_at      │    │ counter         │    
+│ is_active       │    │ created_at      │    
 └─────────────────┘    │ device_name     │    
                        └─────────────────┘    
 
@@ -473,18 +472,18 @@ Response:
 ### Schema Definitions
 
 ```sql
--- Users table with encrypted PII
+-- Users table - Privacy-First Design (No PII Required)
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username VARCHAR(255) UNIQUE NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
     display_name VARCHAR(255) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    is_active BOOLEAN DEFAULT TRUE,
+    is_active BOOLEAN DEFAULT TRUE
     
-    -- Encryption for PII
-    CONSTRAINT valid_email CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
+    -- NOTE: Minimal personal details required at signup
+    -- Privacy-first design - users identified solely by username
+    -- WebAuthn hardware authenticators provide all necessary security
 );
 
 -- WebAuthn credentials (YubiKey, Touch ID, Windows Hello, etc.)
@@ -612,10 +611,6 @@ const userRegistrationValidation = [
     .isLength({ min: 3, max: 50 })
     .matches(/^[A-Za-z0-9_-]+$/)
     .withMessage('Username must be 3-50 characters and contain only letters, numbers, hyphens, and underscores'),
-  body('email')
-    .optional()
-    .isEmail()
-    .withMessage('Must be a valid email address'),
   body('display_name')
     .optional()
     .isLength({ min: 1, max: 255 })
@@ -1394,24 +1389,4 @@ volumes:
 **Backend Options:**
 - **Primary**: Express.js with native WebAuthn implementation (recommended)
 - **Alternative**: Flask with WebAuthn library support (for development/testing)
-- **Simple Setup**: Use `docker-compose.simple.yml` with Express.js backend (no Nginx)
-
-## Scalability & Maintenance
-
-### Horizontal Scaling
-- **Load Balancing**: Nginx with multiple Express.js instances
-- **Database**: Read replicas for scaling reads
-- **Caching**: Redis for session storage and query caching
-- **CDN**: Static asset distribution
-
-### Security Updates
-- **Automated Scanning**: Dependency vulnerability scanning
-- **Update Process**: Blue-green deployments for zero downtime
-- **Monitoring**: Real-time security monitoring and alerting
-- **Backup**: Encrypted automated backups with point-in-time recovery
-
-### Monitoring & Observability
-- **Metrics**: Application performance monitoring
-- **Logs**: Centralized logging with security event correlation
-- **Alerts**: Automated security incident response
-- **Health Checks**: Comprehensive system health monitoring 
+- **Simple Setup**: Use `

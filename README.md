@@ -12,12 +12,24 @@ A self-hosted, highly secure blogging platform with passwordless authentication 
 - **Account Spam Prevention**: 34-day cooldown between device registrations to prevent account spamming
 - **Device Registration Tracking**: AAGUID-based device identification and registration limits
 - **Smart Device Policies**: Different rules for account creation vs. adding devices to existing accounts
-- **Backup Authentication**: TOTP codes and recovery codes for when primary devices are unavailable
+- **Backup Authentication**: TOTP codes and backup recovery codes for device-independent access
+- **Comprehensive Audit Logging**: Track all authentication and security events
+- **Minimal Personal Details at Signup**: Only username required - no emails, phone numbers, or personal details needed at signup
+- **Privacy-First Design**: Built with privacy in mind, minimizing data collection
 - **Admin Privileges**: First registered user automatically receives administrator privileges
 - **End-to-End Encryption**: TLS 1.3 with modern cipher suites
 - **Rate Limiting**: Protection against brute force attacks
 - **Audit Logging**: Complete security event tracking with device registration monitoring
 - **Session Management**: Secure JWT-based sessions with Redis storage
+
+## 🔐 Privacy & Data Protection
+
+- **No Personal Information Required**: No emails, phone numbers, or personal details needed
+- **Username-Only Registration**: Create accounts with just a username and security key
+- **Zero PII Storage**: YuBlog stores no personally identifiable information
+- **GDPR Compliant**: Minimal data collection by design - perfect for privacy-conscious users
+- **Self-Hosted**: Complete control over your data with self-hosted deployment
+- **Secure by Default**: WebAuthn authentication eliminates password-related data breaches
 
 ## ⚠️ IMPORTANT SECURITY NOTICE
 

@@ -706,7 +706,6 @@ export async function completeRegistration(req, res) {
     const newUser = await db.createUser({
       id: user.id,
       username: user.username,
-      email: `${user.username}@webauthn.local`,
       displayName: user.displayName
     });
     

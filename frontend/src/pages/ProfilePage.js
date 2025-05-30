@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -46,6 +46,8 @@ const ProfilePage = () => {
     onConfirm: null
   });
 
+  const totpVerificationInputRef = useRef(null);
+
   useEffect(() => {
     if (activeTab === 'devices' && user) {
       fetchDevices();
@@ -61,6 +63,23 @@ const ProfilePage = () => {
       setActiveTab(tab);
     }
   }, [searchParams]);
+
+  // Auto-focus the TOTP verification input when step 2 is shown
+  useEffect(() => {
+    if (totpSetupStep === 2 && totpVerificationInputRef.current) {
+      // Small delay to ensure the DOM element is ready
+      setTimeout(() => {
+        totpVerificationInputRef.current?.focus();
+      }, 100);
+    }
+  }, [totpSetupStep]);
+
+  // Update URL parameters when tab changes
+  useEffect(() => {
+    setSearchParams({ tab: activeTab });
+    // Clear any existing messages when switching tabs
+    setMessage(null);
+  }, [activeTab, setSearchParams]);
 
   const showMessage = (type, title, messageText, details = {}) => {
     setMessage({
@@ -524,13 +543,6 @@ const ProfilePage = () => {
                     Username
                   </label>
                   <div className="text-gray-900 font-medium">{user?.username}</div>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Email
-                  </label>
-                  <div className="text-gray-900">{user?.email || 'Not provided'}</div>
                 </div>
                 
                 <div>
@@ -1073,6 +1085,7 @@ const ProfilePage = () => {
                         maxLength={6}
                         autoComplete="one-time-code"
                         disabled={verifyingTotp}
+                        ref={totpVerificationInputRef}
                       />
                     </div>
 
