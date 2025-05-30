@@ -5,7 +5,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { 
   Menu, 
   X, 
-  PenTool, 
   User, 
   LogOut, 
   Shield,

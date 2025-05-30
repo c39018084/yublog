@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, Calendar, User, Tag } from 'lucide-react';
@@ -12,7 +12,7 @@ const BlogPage = () => {
   const [error, setError] = useState(null);
   const [message, setMessage] = useState(null);
 
-  const showMessage = (type, title, messageText, details = {}) => {
+  const showMessage = useCallback((type, title, messageText, details = {}) => {
     setMessage({
       type,
       title,
@@ -21,13 +21,9 @@ const BlogPage = () => {
       autoHide: false,
       duration: 0
     });
-  };
-
-  useEffect(() => {
-    fetchPosts();
   }, []);
 
-  const fetchPosts = async () => {
+  const fetchPosts = useCallback(async () => {
     try {
       setLoading(true);
       const response = await axios.get('/posts');
@@ -42,7 +38,11 @@ const BlogPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [showMessage]);
+
+  useEffect(() => {
+    fetchPosts();
+  }, [fetchPosts]);
 
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('en-US', {

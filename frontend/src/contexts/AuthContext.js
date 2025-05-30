@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
 // Configure axios base URL globally
@@ -36,7 +36,7 @@ export const AuthProvider = ({ children }) => {
     } else {
       setIsLoading(false);
     }
-  }, [token, skipProfileFetch]);
+  }, [token, skipProfileFetch, user, fetchUserProfile]);
 
   // Debug authentication state changes
   useEffect(() => {
@@ -49,7 +49,23 @@ export const AuthProvider = ({ children }) => {
     });
   }, [user, token, isLoading, skipProfileFetch]);
 
-  const fetchUserProfile = async () => {
+  const logout = useCallback(async () => {
+    try {
+      // Call logout endpoint if token exists
+      if (token) {
+        await axios.post('/api/auth/logout');
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      setToken(null);
+      setUser(null);
+      localStorage.removeItem('yublog_token');
+      delete axios.defaults.headers.common['Authorization'];
+    }
+  }, [token]);
+
+  const fetchUserProfile = useCallback(async () => {
     try {
       console.log('Fetching user profile...');
       const response = await axios.get('/api/user/profile');
@@ -65,7 +81,7 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [logout]);
 
   const login = (authToken, userData) => {
     console.log('AuthContext login called with:', { authToken: !!authToken, userData });
@@ -83,22 +99,6 @@ export const AuthProvider = ({ children }) => {
     setTimeout(() => {
       setSkipProfileFetch(false);
     }, 1000);
-  };
-
-  const logout = async () => {
-    try {
-      // Call logout endpoint if token exists
-      if (token) {
-        await axios.post('/api/auth/logout');
-      }
-    } catch (error) {
-      console.error('Logout error:', error);
-    } finally {
-      setToken(null);
-      setUser(null);
-      localStorage.removeItem('yublog_token');
-      delete axios.defaults.headers.common['Authorization'];
-    }
   };
 
   const isAuthenticated = Boolean(user && token);
